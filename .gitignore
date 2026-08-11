@@ -1,0 +1,66 @@
+# Python
+__pycache__/
+*.py[cod]
+*.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+.venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Output files
+output/
+
+# Generated data
+data/cache/
+data/raw/
+data/candidates/
+data/failures/
+data/ai_scoring/
+data/news_inputs/
+data/knowledge/
+.playwright-cli/
+data/stocklist.csv
+data/oversell.db
+data/oversell.db-*
+
+# Frontend
+web/node_modules/
+web/dist/
+web/.vite/
+
+# Logs
+*.log
+
+# Local secrets
+.env.local
+.env.*
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db

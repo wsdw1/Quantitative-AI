@@ -1,0 +1,10 @@
+data:
+  adjust: qfq
+  history_days: 700
+  rate_limit_per_minute: 300
+  request_interval_seconds: 0.15
+  max_retries: 3
+  second_pass_enabled: true
+  second_pass_sleep_seconds: 8
+  max_workers: 10
+  bulk_incremental_enabled: true
