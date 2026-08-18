@@ -234,6 +234,9 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_index_prices_code ON index_prices(code, trade_date);
             """
         )
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(stocks)")}
+        if "industry" not in columns:
+            conn.execute("ALTER TABLE stocks ADD COLUMN industry TEXT")
 
 
 def _float_or_none(value: Any) -> float | None:
@@ -797,6 +800,30 @@ def upsert_stocks(stock_list: pd.DataFrame) -> None:
                list_date=excluded.list_date,updated_at=excluded.updated_at""",
             rows,
         )
+
+
+def upsert_stock_industries(mapping: dict[str, str]) -> int:
+    """Set industry for existing stocks. mapping: {6-digit code: industry name}."""
+    init_db()
+    now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    updated = 0
+    with _connect() as conn:
+        for code, industry in mapping.items():
+            cursor = conn.execute(
+                "UPDATE stocks SET industry=?, updated_at=? WHERE code=?",
+                (str(industry), now, str(code).zfill(6)),
+            )
+            updated += int(cursor.rowcount)
+    return updated
+
+
+def load_stock_industries() -> dict[str, str]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT code, industry FROM stocks WHERE industry IS NOT NULL AND industry != ''"
+        ).fetchall()
+    return {str(row[0]).zfill(6): str(row[1]) for row in rows}
 
 
 def load_stocks() -> pd.DataFrame:

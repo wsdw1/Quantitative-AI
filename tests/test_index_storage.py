@@ -58,6 +58,18 @@ class IndexStorageTests(unittest.TestCase):
         self.assertEqual(database.index_price_codes(), {"399006.SZ"})
         self.assertEqual(database.index_price_signature()[0], 2)
 
+    def test_industry_mapping_round_trip(self) -> None:
+        database.upsert_stocks(pd.DataFrame(
+            [{"代码": "000001", "名称": "平安银行", "ts_code": "000001.SZ", "market": "主板", "list_date": "19910403"}]
+        ))
+        updated = database.upsert_stock_industries({"000001": "银行"})
+        self.assertEqual(updated, 1)
+        self.assertEqual(database.load_stock_industries(), {"000001": "银行"})
+
+    def test_industry_mapping_skips_unknown_code(self) -> None:
+        self.assertEqual(database.upsert_stock_industries({"999999": "未知"}), 0)
+        self.assertEqual(database.load_stock_industries(), {})
+
 
 if __name__ == "__main__":
     unittest.main()
