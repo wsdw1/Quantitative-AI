@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 import pandas as pd
 
+from pipeline.schemas import Candidate
+from strategies.base import StrategyContext
 from strategies.registry import get_strategy, list_strategies
 from strategies.resonance.strategy import ResonanceStrategy
 
@@ -61,6 +64,76 @@ class ResonanceSkeletonTests(unittest.TestCase):
         merged = strategy.prepare_all({"000001": frame}, strategy._cfg({}))
         self.assertIn("kdj_col", merged["000001"].columns)
         self.assertIn("mom_col", merged["000001"].columns)
+
+
+def _candidate(code: str, score: float, strategy: str = "resonance") -> Candidate:
+    return Candidate(
+        code=code, name=code, date="2026-08-18", strategy=strategy,
+        close=10.0, turnover_n=1000.0, score=score,
+    )
+
+
+class ResonanceMergeTests(unittest.TestCase):
+    def _context(self) -> StrategyContext:
+        return StrategyContext(
+            pick_date=pd.Timestamp("2026-08-18"),
+            names={"000001": "股票1", "000002": "股票2", "000003": "股票3"},
+            pool={"000001", "000002", "000003"},
+            progress_enabled=False,
+        )
+
+    def test_merge_requires_min_hits_and_sums_percentile_ranks(self) -> None:
+        strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
+        cfg = strategy._cfg({})
+        sub_results = [
+            [_candidate("000001", 1.0, strategy="s1"), _candidate("000002", 2.0, strategy="s1")],
+            [_candidate("000002", 1.0, strategy="s2"), _candidate("000003", 2.0, strategy="s2")],
+        ]
+        merged = strategy._merge(sub_results, cfg)
+        codes = {item.code for item in merged}
+        self.assertEqual(codes, {"000002"})
+        hit = next(item for item in merged if item.code == "000002")
+        self.assertEqual(hit.extra["hit_count"], 2)
+        self.assertEqual(hit.strategy, "resonance")
+        self.assertIn("hits", hit.extra)
+
+    def test_risk_regime_downweights_high_position_stocks(self) -> None:
+        strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
+        candidates = [_candidate("000001", 1.0), _candidate("000002", 1.0)]
+        fake_regime = {
+            "regime": "risk", "available": True,
+            "market": [{"code": "000001.SH", "position": 90.0}],
+            "boards": {},
+        }
+        with patch("market_analysis.positions.market_regime", return_value=fake_regime), \
+             patch("market_analysis.positions.stock_positions", return_value={"000001": 90.0, "000002": 20.0}):
+            result = strategy._apply_regime(candidates, strategy._cfg({}), self._context(), {})
+        by_code = {item.code: item for item in result}
+        self.assertEqual(by_code["000001"].extra["regime"], "risk")
+        self.assertEqual(by_code["000001"].score, 0.5)
+        self.assertEqual(by_code["000002"].score, 1.0)
+
+    def test_bottom_regime_adds_pool_candidates(self) -> None:
+        strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
+        frame = pd.DataFrame(
+            {"close": [10.0] * 20 + [10.5], "pct_chg": [0.0] * 20 + [5.0],
+             "volume": [1000.0] * 21, "amount": [10000.0] * 21},
+            index=pd.bdate_range("2026-07-20", periods=21),
+        )
+        frame.iloc[-1, frame.columns.get_loc("volume")] = 1400.0
+        data = {"000003": frame}
+        context = StrategyContext(
+            pick_date=frame.index[-1],
+            names={"000003": "股票3"},
+            pool={"000003"},
+            progress_enabled=False,
+        )
+        fake_regime = {"regime": "bottom", "available": True, "market": [], "boards": {}}
+        with patch("market_analysis.positions.market_regime", return_value=fake_regime), \
+             patch("market_analysis.positions.stock_positions", return_value={"000003": 5.0}):
+            result = strategy._apply_regime([], strategy._cfg({}), context, data)
+        self.assertEqual([item.code for item in result], ["000003"])
+        self.assertTrue(result[0].extra["bottom_signal"])
 
 
 if __name__ == "__main__":
