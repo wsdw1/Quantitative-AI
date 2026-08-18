@@ -5,12 +5,16 @@ from typing import Dict
 
 from strategies.base import BaseStrategy, StrategyMeta
 from strategies.b1.strategy import B1Strategy
+from strategies.high_52w_momentum.strategy import High52WeekMomentumStrategy
+from strategies.resonance.strategy import ResonanceStrategy
 from strategies.volume_new_high.strategy import VolumeNewHighStrategy
 
 
 _STRATEGIES: Dict[str, BaseStrategy] = {
     "b1": B1Strategy(),
     "volume_new_high": VolumeNewHighStrategy(),
+    "high_52w_momentum": High52WeekMomentumStrategy(),
+    "resonance": ResonanceStrategy(),
 }
 
 
@@ -28,4 +32,3 @@ def list_strategies() -> list[StrategyMeta]:
 
 def default_strategy_configs() -> dict:
     return {strategy.meta.id: dict(strategy.meta.default_config) for strategy in _STRATEGIES.values()}
-
