@@ -81,7 +81,7 @@ class ResonanceStrategy:
 
     def cache_columns(self, cfg: dict) -> set[str]:
         cfg = self._cfg(cfg)
-        columns: set[str] = {"close", "turnover_n", "volume", "pct_chg", "pos252"}
+        columns: set[str] = {"close", "turnover_n", "volume", "pct_chg", "pos252", "vol_ma20"}
         for sub_id, strategy in self._sub_strategies(cfg):
             if hasattr(strategy, "cache_columns"):
                 columns |= set(strategy.cache_columns(self._sub_cfg(cfg, sub_id)))
@@ -110,6 +110,10 @@ class ResonanceStrategy:
         for code, frame in merged.items():
             if "pos252" not in frame.columns:
                 frame["pos252"] = compute_position(frame["close"], 252)
+            if "vol_ma20" not in frame.columns:
+                column = "vol" if "vol" in frame.columns else "volume"
+                if column in frame.columns:
+                    frame["vol_ma20"] = pd.to_numeric(frame[column], errors="coerce").rolling(20, min_periods=5).mean()
         return merged
 
     def select_prepared(
@@ -226,13 +230,13 @@ class ResonanceStrategy:
                 continue
             pct_chg = row.get("pct_chg")
             column = "vol" if "vol" in frame.columns else "volume"
-            if column not in frame.columns or "pct_chg" not in frame.columns:
+            vol_ma = row.get("vol_ma20")
+            if column not in frame.columns or "pct_chg" not in frame.columns or vol_ma is None:
                 continue
             volume = row.get(column)
-            ma = frame[column].rolling(20, min_periods=5).mean()
-            if context.pick_date not in ma.index or not (float(ma.loc[context.pick_date]) > 0):
+            if not (float(vol_ma) > 0):
                 continue
-            if not (float(pct_chg or 0) > 0 and float(volume or 0) / float(ma.loc[context.pick_date]) >= ratio):
+            if not (float(pct_chg or 0) > 0 and float(volume or 0) / float(vol_ma) >= ratio):
                 continue
             result.append(Candidate(
                 code=code,

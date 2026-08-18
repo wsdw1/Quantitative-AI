@@ -123,7 +123,7 @@ class ResonanceMergeTests(unittest.TestCase):
         strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
         frame = pd.DataFrame(
             {"close": [10.0] * 20 + [10.5], "pct_chg": [0.0] * 20 + [5.0],
-             "volume": [1000.0] * 21, "amount": [10000.0] * 21, "pos252": 5.0},
+             "volume": [1000.0] * 21, "amount": [10000.0] * 21, "pos252": 5.0, "vol_ma20": 1000.0},
             index=pd.bdate_range("2026-07-20", periods=21),
         )
         frame.iloc[-1, frame.columns.get_loc("volume")] = 1400.0
@@ -169,6 +169,8 @@ class ResonanceMergeTests(unittest.TestCase):
         merged = strategy.prepare_all({"000001": frame}, strategy._cfg({}))
         self.assertIn("pos252", merged["000001"].columns)
         self.assertEqual(float(merged["000001"]["pos252"].iloc[-1]), 100.0)
+        self.assertIn("vol_ma20", merged["000001"].columns)
+        self.assertEqual(float(merged["000001"]["vol_ma20"].iloc[-1]), 1000.0)
 
 
 if __name__ == "__main__":
