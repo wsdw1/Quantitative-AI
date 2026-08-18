@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import Callable
 
 import pandas as pd
@@ -80,7 +81,7 @@ class ResonanceStrategy:
 
     def cache_columns(self, cfg: dict) -> set[str]:
         cfg = self._cfg(cfg)
-        columns: set[str] = {"close", "turnover_n", "volume", "pct_chg"}
+        columns: set[str] = {"close", "turnover_n", "volume", "pct_chg", "pos252"}
         for sub_id, strategy in self._sub_strategies(cfg):
             if hasattr(strategy, "cache_columns"):
                 columns |= set(strategy.cache_columns(self._sub_cfg(cfg, sub_id)))
@@ -104,6 +105,11 @@ class ResonanceStrategy:
                     continue
                 extra = frame.columns.difference(merged[code].columns)
                 merged[code] = merged[code].join(frame[extra], how="outer").sort_index()
+        from market_analysis.positions import compute_position
+
+        for code, frame in merged.items():
+            if "pos252" not in frame.columns:
+                frame["pos252"] = compute_position(frame["close"], 252)
         return merged
 
     def select_prepared(
@@ -154,7 +160,7 @@ class ResonanceStrategy:
         context: StrategyContext,
         data: dict[str, pd.DataFrame],
     ) -> list[Candidate]:
-        from market_analysis.positions import market_regime, stock_positions
+        from market_analysis.positions import market_regime
 
         as_of = context.pick_date.strftime("%Y-%m-%d")
         regime_payload = market_regime(
@@ -164,8 +170,17 @@ class ResonanceStrategy:
             reversal_volume_ratio=float(cfg["reversal_volume_ratio"]),
         )
         regime = regime_payload.get("regime", "neutral")
-        codes = [item.code for item in candidates]
-        positions = stock_positions(codes, as_of=as_of) if codes else {}
+        positions: dict[str, float | None] = {}
+        for code in {item.code for item in candidates}:
+            frame = data.get(code)
+            if frame is None or context.pick_date not in frame.index or "pos252" not in frame.columns:
+                positions[code] = None
+                continue
+            row = frame.loc[context.pick_date]
+            if isinstance(row, pd.DataFrame):
+                row = row.iloc[-1]
+            value = row.get("pos252")
+            positions[code] = float(value) if value is not None and math.isfinite(float(value)) else None
         for item in candidates:
             item.extra["regime"] = regime
             item.extra["market_pos"] = {entry["code"]: entry["position"] for entry in regime_payload.get("market", [])}
@@ -195,24 +210,20 @@ class ResonanceStrategy:
         cfg: dict,
         context: StrategyContext,
     ) -> list[Candidate]:
-        from market_analysis.positions import stock_positions
-
         cap = float(cfg["bottom_stock_pos_cap"])
         ratio = float(cfg["reversal_volume_ratio"])
-        codes = [code for code in data if context.pool is None or code in context.pool]
-        positions = stock_positions(codes, as_of=context.pick_date.strftime("%Y-%m-%d"))
         result: list[Candidate] = []
         for code, frame in data.items():
             if context.pool is not None and code not in context.pool:
                 continue
             if context.pick_date not in frame.index:
                 continue
-            position = positions.get(code)
-            if position is None or position > cap:
-                continue
             row = frame.loc[context.pick_date]
             if isinstance(row, pd.DataFrame):
                 row = row.iloc[-1]
+            position = row.get("pos252")
+            if position is None or position > cap:
+                continue
             pct_chg = row.get("pct_chg")
             column = "vol" if "vol" in frame.columns else "volume"
             if column not in frame.columns or "pct_chg" not in frame.columns:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
 
 from pipeline.schemas import Candidate
@@ -100,14 +101,19 @@ class ResonanceMergeTests(unittest.TestCase):
     def test_risk_regime_downweights_high_position_stocks(self) -> None:
         strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
         candidates = [_candidate("000001", 1.0), _candidate("000002", 1.0)]
+        dates = pd.bdate_range("2026-07-20", periods=300)
+        data = {
+            "000001": pd.DataFrame({"close": np.linspace(10, 20, 300), "pos252": 90.0}, index=dates),
+            "000002": pd.DataFrame({"close": np.linspace(10, 20, 300), "pos252": 20.0}, index=dates),
+        }
         fake_regime = {
             "regime": "risk", "available": True,
             "market": [{"code": "000001.SH", "position": 90.0}],
             "boards": {},
         }
         with patch("market_analysis.positions.market_regime", return_value=fake_regime), \
-             patch("market_analysis.positions.stock_positions", return_value={"000001": 90.0, "000002": 20.0}):
-            result = strategy._apply_regime(candidates, strategy._cfg({}), self._context(), {})
+             patch("market_analysis.positions.stock_positions", return_value={}):
+            result = strategy._apply_regime(candidates, strategy._cfg({}), self._context(), data)
         by_code = {item.code: item for item in result}
         self.assertEqual(by_code["000001"].extra["regime"], "risk")
         self.assertEqual(by_code["000001"].score, 0.5)
@@ -117,7 +123,7 @@ class ResonanceMergeTests(unittest.TestCase):
         strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
         frame = pd.DataFrame(
             {"close": [10.0] * 20 + [10.5], "pct_chg": [0.0] * 20 + [5.0],
-             "volume": [1000.0] * 21, "amount": [10000.0] * 21},
+             "volume": [1000.0] * 21, "amount": [10000.0] * 21, "pos252": 5.0},
             index=pd.bdate_range("2026-07-20", periods=21),
         )
         frame.iloc[-1, frame.columns.get_loc("volume")] = 1400.0
@@ -130,7 +136,7 @@ class ResonanceMergeTests(unittest.TestCase):
         )
         fake_regime = {"regime": "bottom", "available": True, "market": [], "boards": {}}
         with patch("market_analysis.positions.market_regime", return_value=fake_regime), \
-             patch("market_analysis.positions.stock_positions", return_value={"000003": 5.0}):
+             patch("market_analysis.positions.stock_positions", return_value={}):
             result = strategy._apply_regime([], strategy._cfg({}), context, data)
         self.assertEqual([item.code for item in result], ["000003"])
         self.assertTrue(result[0].extra["bottom_signal"])
@@ -138,7 +144,7 @@ class ResonanceMergeTests(unittest.TestCase):
     def test_bottom_pool_skips_frame_without_volume_column(self) -> None:
         strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
         frame = pd.DataFrame(
-            {"close": [10.0] * 21, "turnover_n": [10000.0] * 21},
+            {"close": [10.0] * 21, "turnover_n": [10000.0] * 21, "pos252": 5.0},
             index=pd.bdate_range("2026-07-20", periods=21),
         )
         context = StrategyContext(
@@ -149,9 +155,20 @@ class ResonanceMergeTests(unittest.TestCase):
         )
         fake_regime = {"regime": "bottom", "available": True, "market": [], "boards": {}}
         with patch("market_analysis.positions.market_regime", return_value=fake_regime), \
-             patch("market_analysis.positions.stock_positions", return_value={"000003": 5.0}):
+             patch("market_analysis.positions.stock_positions", return_value={}):
             result = strategy._apply_regime([], strategy._cfg({}), context, {"000003": frame})
         self.assertEqual(result, [])
+
+    def test_prepare_all_adds_pos252_column(self) -> None:
+        strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
+        closes = list(range(1, 301))
+        frame = pd.DataFrame(
+            {"close": closes, "volume": [1000.0] * 300, "amount": [10000.0] * 300},
+            index=pd.bdate_range("2025-01-01", periods=300),
+        )
+        merged = strategy.prepare_all({"000001": frame}, strategy._cfg({}))
+        self.assertIn("pos252", merged["000001"].columns)
+        self.assertEqual(float(merged["000001"]["pos252"].iloc[-1]), 100.0)
 
 
 if __name__ == "__main__":
