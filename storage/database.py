@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import numpy as np
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "data" / "oversell.db"
@@ -221,8 +222,100 @@ def init_db() -> None:
                 PRIMARY KEY(code, adjust, trade_date)
             );
             CREATE INDEX IF NOT EXISTS idx_daily_prices_lookup ON daily_prices(adjust, code, trade_date);
+
+            CREATE TABLE IF NOT EXISTS index_prices (
+                code TEXT NOT NULL,
+                trade_date TEXT NOT NULL,
+                open REAL, high REAL, low REAL, close REAL,
+                vol REAL, amount REAL, pct_chg REAL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY(code, trade_date)
+            );
+            CREATE INDEX IF NOT EXISTS idx_index_prices_code ON index_prices(code, trade_date);
             """
         )
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        result = float(value)
+        return None if not np.isfinite(result) else result
+    except (TypeError, ValueError):
+        return None
+
+
+def upsert_index_prices(frames: dict[str, pd.DataFrame]) -> int:
+    """Persist index daily bars. frames: {code: DataFrame(DatetimeIndex, cols open/high/low/close/vol/amount/pct_chg)}."""
+    init_db()
+    now = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+    rows: list[tuple[Any, ...]] = []
+    for code, frame in frames.items():
+        for ts, row in frame.iterrows():
+            rows.append((
+                str(code), ts.strftime("%Y-%m-%d"),
+                _float_or_none(row.get("open")), _float_or_none(row.get("high")),
+                _float_or_none(row.get("low")), _float_or_none(row.get("close")),
+                _float_or_none(row.get("vol")), _float_or_none(row.get("amount")),
+                _float_or_none(row.get("pct_chg")), now,
+            ))
+    if not rows:
+        return 0
+    with _connect() as conn:
+        conn.executemany(
+            """INSERT OR REPLACE INTO index_prices
+               (code, trade_date, open, high, low, close, vol, amount, pct_chg, updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            rows,
+        )
+    return len(rows)
+
+
+def load_index_prices(
+    codes: list[str] | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict[str, pd.DataFrame]:
+    """Read index daily bars as {code: DataFrame(DatetimeIndex)} sorted by date."""
+    init_db()
+    clauses: list[str] = []
+    params: list[Any] = []
+    if codes:
+        clauses.append(f"code IN ({','.join('?' for _ in codes)})")
+        params.extend(codes)
+    if start_date:
+        clauses.append("trade_date>=?")
+        params.append(start_date)
+    if end_date:
+        clauses.append("trade_date<=?")
+        params.append(end_date)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    with _connect() as conn:
+        frame = pd.read_sql_query(
+            f"SELECT * FROM index_prices{where} ORDER BY code, trade_date",
+            conn, params=params,
+        )
+    if frame.empty:
+        return {}
+    result: dict[str, pd.DataFrame] = {}
+    for code, group in frame.groupby("code", sort=False):
+        group = group.copy()
+        group.index = pd.to_datetime(group.pop("trade_date"))
+        result[code] = group.drop(columns=["code", "updated_at"], errors="ignore")
+    return result
+
+
+def index_price_codes() -> set[str]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute("SELECT DISTINCT code FROM index_prices").fetchall()
+    return {str(row[0]) for row in rows}
+
+
+def index_price_signature() -> tuple[int, str | None, str | None]:
+    init_db()
+    with _connect() as conn:
+        row = conn.execute("SELECT count(*), min(trade_date), max(trade_date) FROM index_prices").fetchone()
+    return int(row[0] or 0), row[1], row[2]
 
 
 def upsert_pipeline_run(payload: dict[str, Any], request_payload: dict[str, Any] | None = None) -> None:
@@ -336,12 +429,14 @@ def upsert_backtest_run(payload: dict[str, Any], request_payload: dict[str, Any]
 
 
 def _backtest_row(row: sqlite3.Row) -> dict[str, Any]:
+    request = _decode(row["request_json"], {})
     return {
         "backtest_id": row["backtest_id"],
         "strategy_id": row["strategy_id"],
         "start_date": row["start_date"],
         "end_date": row["end_date"],
         "holding_days": row["holding_days"],
+        "holding_periods": request.get("holding_periods") or [row["holding_days"]],
         "status": row["status"],
         "stage": row["stage"],
         "progress": row["progress"],
@@ -351,7 +446,7 @@ def _backtest_row(row: sqlite3.Row) -> dict[str, Any]:
         "finished_at": row["finished_at"],
         "error": row["error"],
         "logs": _decode(row["logs_json"], []),
-        "request": _decode(row["request_json"], {}),
+        "request": request,
         "result": _decode(row["result_json"], None),
     }
 
@@ -756,7 +851,7 @@ def upsert_price_batch(prices: dict[str, pd.DataFrame], adjust: str) -> None:
     items = list(prices.items())
     total = len(items)
     total_rows = sum(len(frame) for _, frame in items if frame is not None)
-    chunk_size = 1000
+    chunk_size = 250
     logger.info("SQLite 行情同步开始：%d 只股票，共 %d 条记录", total, total_rows)
     written_rows = 0
     for offset in range(0, total, chunk_size):
@@ -879,6 +974,70 @@ def list_trade_dates(adjust: str, start_date: str | None = None, end_date: str |
     with _connect() as conn:
         rows = conn.execute(query, params).fetchall()
     return [str(row["trade_date"]) for row in rows]
+
+
+def load_market_price_window(
+    adjust: str = "qfq",
+    bars: int = 90,
+    end_date: str | None = None,
+) -> pd.DataFrame:
+    """Load a compact, flat market window for cross-sectional breadth calculations."""
+    init_db()
+    safe_bars = max(20, min(int(bars), 400))
+    clauses = ["adjust=?"]
+    params: list[Any] = [adjust or "bfq"]
+    if end_date:
+        clauses.append("trade_date<=?")
+        params.append(end_date)
+    with _connect() as conn:
+        date_rows = conn.execute(
+            "SELECT DISTINCT trade_date FROM daily_prices WHERE "
+            + " AND ".join(clauses)
+            + " ORDER BY trade_date DESC LIMIT ?",
+            [*params, safe_bars],
+        ).fetchall()
+        dates = sorted(str(row["trade_date"]) for row in date_rows)
+        if not dates:
+            return pd.DataFrame(columns=["code", "trade_date", "high", "low", "close", "pct_chg"])
+        frame = pd.read_sql_query(
+            """SELECT code, trade_date, high, low, close, pct_chg
+               FROM daily_prices
+               WHERE adjust=? AND trade_date>=? AND trade_date<=?
+               ORDER BY code, trade_date""",
+            conn,
+            params=(adjust or "bfq", dates[0], dates[-1]),
+        )
+    return frame
+
+
+def daily_price_fingerprint(adjust: str, start_date: str, end_date: str) -> dict[str, Any]:
+    """Return a cheap data-version fingerprint for backtest indicator caches."""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            """SELECT COUNT(*) AS row_count,
+                      COUNT(DISTINCT code) AS code_count,
+                      MIN(trade_date) AS first_date,
+                      MAX(trade_date) AS latest_date,
+                      MAX(updated_at) AS latest_update,
+                      ROUND(SUM(open), 4) AS open_sum,
+                      ROUND(SUM(high), 4) AS high_sum,
+                      ROUND(SUM(low), 4) AS low_sum,
+                      ROUND(SUM(close), 4) AS close_sum,
+                      ROUND(SUM(volume), 4) AS volume_sum,
+                      ROUND(SUM(amount), 4) AS amount_sum
+               FROM daily_prices
+               WHERE adjust=? AND trade_date>=? AND trade_date<=?""",
+            (adjust or "bfq", start_date, end_date),
+        ).fetchone()
+    return {
+        "row_count": int(row["row_count"] or 0),
+        "code_count": int(row["code_count"] or 0),
+        "first_date": row["first_date"],
+        "latest_date": row["latest_date"],
+        "latest_update": row["latest_update"],
+        "value_sums": [row["open_sum"], row["high_sum"], row["low_sum"], row["close_sum"], row["volume_sum"], row["amount_sum"]],
+    }
 
 
 def load_daily_prices(
