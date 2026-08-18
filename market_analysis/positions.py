@@ -135,6 +135,8 @@ def _positions_payload(as_of: str | None) -> dict[str, Any]:
             frame = frame.loc[frame.index <= pd.Timestamp(as_of)]
         row = latest[code]
         position = float(compute_position(frame["close"], WINDOW).iloc[-1])
+        if not np.isfinite(position):
+            continue
         market.append({
             "code": code,
             "position": round(position, 1),
@@ -161,6 +163,8 @@ def _positions_payload(as_of: str | None) -> dict[str, Any]:
         if as_of is not None:
             frame = frame.loc[frame.index <= pd.Timestamp(as_of)]
         position = float(compute_position(frame["close"], WINDOW).iloc[-1])
+        if not np.isfinite(position):
+            continue
         industries.append({
             "code": code,
             "position": round(position, 1),
