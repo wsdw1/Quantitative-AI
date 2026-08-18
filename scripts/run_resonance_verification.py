@@ -1,7 +1,9 @@
 """Run calibration/validation backtests for resonance vs baselines.
 
 Usage:
-    python scripts/run_resonance_verification.py
+    python scripts/run_resonance_verification.py                       # all windows, all runs
+    python scripts/run_resonance_verification.py --windows validation  # one window only
+    python scripts/run_resonance_verification.py --runs baseline-b1,resonance-full
 
 Requires: local stock history >= 1500 trading days (Task 0) and index data
 (Task 3: python pipeline/fetch_indices.py).
@@ -9,6 +11,7 @@ Requires: local stock history >= 1500 trading days (Task 0) and index data
 from __future__ import annotations
 
 import sys
+import argparse
 from pathlib import Path
 
 import pandas as pd
@@ -54,10 +57,12 @@ def _config(strategy_id: str, with_regime: bool) -> dict:
     }
 
 
-def main() -> None:
+def main(only_windows: list[str] | None = None, only_runs: list[str] | None = None) -> None:
     rows: list[dict] = []
-    for start, end, phase in WINDOWS:
-        for strategy_id, label in RUNS:
+    windows = [item for item in WINDOWS if only_windows is None or item[2] in only_windows]
+    runs = [item for item in RUNS if only_runs is None or item[1] in only_runs]
+    for start, end, phase in windows:
+        for strategy_id, label in runs:
             try:
                 request = BacktestRequest(
                     strategy_id=strategy_id,
@@ -94,4 +99,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="resonance 校准/验证回测")
+    parser.add_argument("--windows", nargs="*", choices=["calibration-1", "calibration-2", "validation"], default=None)
+    parser.add_argument("--runs", nargs="*", default=None, help="标签子集，如 baseline-b1 resonance-full")
+    args = parser.parse_args()
+    main(only_windows=args.windows, only_runs=args.runs)
