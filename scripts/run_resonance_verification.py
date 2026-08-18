@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import sys
 import argparse
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -59,6 +60,8 @@ def _config(strategy_id: str, with_regime: bool) -> dict:
 
 def main(only_windows: list[str] | None = None, only_runs: list[str] | None = None) -> None:
     rows: list[dict] = []
+    out_dir = _ROOT / "data" / "resonance_verification"
+    out_dir.mkdir(parents=True, exist_ok=True)
     windows = [item for item in WINDOWS if only_windows is None or item[2] in only_windows]
     runs = [item for item in RUNS if only_runs is None or item[1] in only_runs]
     for start, end, phase in windows:
@@ -84,18 +87,25 @@ def main(only_windows: list[str] | None = None, only_runs: list[str] | None = No
                     "signal_day_count": metrics["signal_day_count"],
                     "error": None,
                 })
+                _append_row(out_dir, rows[-1])
                 print(phase, label, metrics["signal_count"], metrics["win_rate_pct"], metrics["average_return_pct"])
             except Exception as exc:  # noqa: BLE001
-                rows.append({
+                row = {
                     "phase": phase, "label": label, "strategy_id": strategy_id,
                     "signal_count": None, "win_rate_pct": None, "average_return_pct": None,
                     "profit_factor": None, "signal_day_count": None, "error": str(exc)[:300],
-                })
+                }
+                rows.append(row)
+                _append_row(out_dir, row)
                 print(phase, label, "ERROR", str(exc)[:200])
-    out_dir = _ROOT / "data" / "resonance_verification"
-    out_dir.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_csv(out_dir / "summary.csv", index=False, encoding="utf-8-sig")
     print("saved:", out_dir / "summary.csv")
+
+
+def _append_row(out_dir: Path, row: dict) -> None:
+    path = out_dir / "runs.jsonl"
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 if __name__ == "__main__":
