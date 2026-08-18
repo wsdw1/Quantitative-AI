@@ -135,6 +135,24 @@ class ResonanceMergeTests(unittest.TestCase):
         self.assertEqual([item.code for item in result], ["000003"])
         self.assertTrue(result[0].extra["bottom_signal"])
 
+    def test_bottom_pool_skips_frame_without_volume_column(self) -> None:
+        strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
+        frame = pd.DataFrame(
+            {"close": [10.0] * 21, "turnover_n": [10000.0] * 21},
+            index=pd.bdate_range("2026-07-20", periods=21),
+        )
+        context = StrategyContext(
+            pick_date=frame.index[-1],
+            names={"000003": "股票3"},
+            pool={"000003"},
+            progress_enabled=False,
+        )
+        fake_regime = {"regime": "bottom", "available": True, "market": [], "boards": {}}
+        with patch("market_analysis.positions.market_regime", return_value=fake_regime), \
+             patch("market_analysis.positions.stock_positions", return_value={"000003": 5.0}):
+            result = strategy._apply_regime([], strategy._cfg({}), context, {"000003": frame})
+        self.assertEqual(result, [])
+
 
 if __name__ == "__main__":
     unittest.main()

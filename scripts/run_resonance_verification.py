@@ -58,26 +58,35 @@ def main() -> None:
     rows: list[dict] = []
     for start, end, phase in WINDOWS:
         for strategy_id, label in RUNS:
-            request = BacktestRequest(
-                strategy_id=strategy_id,
-                start_date=start,
-                end_date=end,
-                holding_periods=HOLDING_PERIODS,
-                config=_config(strategy_id, with_regime="full" in label),
-            )
-            result = run_backtest(f"verify-{phase}-{label}", request)
-            metrics = result.metrics
-            rows.append({
-                "phase": phase,
-                "label": label,
-                "strategy_id": strategy_id,
-                "signal_count": metrics["signal_count"],
-                "win_rate_pct": metrics["win_rate_pct"],
-                "average_return_pct": metrics["average_return_pct"],
-                "profit_factor": metrics["profit_factor"],
-                "signal_day_count": metrics["signal_day_count"],
-            })
-            print(phase, label, metrics["signal_count"], metrics["win_rate_pct"], metrics["average_return_pct"])
+            try:
+                request = BacktestRequest(
+                    strategy_id=strategy_id,
+                    start_date=start,
+                    end_date=end,
+                    holding_periods=HOLDING_PERIODS,
+                    config=_config(strategy_id, with_regime="full" in label),
+                )
+                result = run_backtest(f"verify-{phase}-{label}", request)
+                metrics = result.metrics
+                rows.append({
+                    "phase": phase,
+                    "label": label,
+                    "strategy_id": strategy_id,
+                    "signal_count": metrics["signal_count"],
+                    "win_rate_pct": metrics["win_rate_pct"],
+                    "average_return_pct": metrics["average_return_pct"],
+                    "profit_factor": metrics["profit_factor"],
+                    "signal_day_count": metrics["signal_day_count"],
+                    "error": None,
+                })
+                print(phase, label, metrics["signal_count"], metrics["win_rate_pct"], metrics["average_return_pct"])
+            except Exception as exc:  # noqa: BLE001
+                rows.append({
+                    "phase": phase, "label": label, "strategy_id": strategy_id,
+                    "signal_count": None, "win_rate_pct": None, "average_return_pct": None,
+                    "profit_factor": None, "signal_day_count": None, "error": str(exc)[:300],
+                })
+                print(phase, label, "ERROR", str(exc)[:200])
     out_dir = _ROOT / "data" / "resonance_verification"
     out_dir.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_csv(out_dir / "summary.csv", index=False, encoding="utf-8-sig")

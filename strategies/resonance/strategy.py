@@ -80,7 +80,7 @@ class ResonanceStrategy:
 
     def cache_columns(self, cfg: dict) -> set[str]:
         cfg = self._cfg(cfg)
-        columns: set[str] = {"close", "turnover_n"}
+        columns: set[str] = {"close", "turnover_n", "volume", "pct_chg"}
         for sub_id, strategy in self._sub_strategies(cfg):
             if hasattr(strategy, "cache_columns"):
                 columns |= set(strategy.cache_columns(self._sub_cfg(cfg, sub_id)))
@@ -215,6 +215,8 @@ class ResonanceStrategy:
                 row = row.iloc[-1]
             pct_chg = row.get("pct_chg")
             column = "vol" if "vol" in frame.columns else "volume"
+            if column not in frame.columns or "pct_chg" not in frame.columns:
+                continue
             volume = row.get(column)
             ma = frame[column].rolling(20, min_periods=5).mean()
             if context.pick_date not in ma.index or not (float(ma.loc[context.pick_date]) > 0):
