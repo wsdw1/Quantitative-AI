@@ -1,12 +1,15 @@
 """Run calibration/validation backtests for resonance vs baselines.
 
 Usage:
-    python scripts/run_resonance_verification.py                       # all windows, all runs
+    python scripts/run_resonance_verification.py                       # fast: validation only, main board, top1500
+    python scripts/run_resonance_verification.py --full                # full study: 3 windows, all boards, top3000
     python scripts/run_resonance_verification.py --windows validation  # one window only
     python scripts/run_resonance_verification.py --runs baseline-b1,resonance-full
 
-Requires: local stock history >= 1500 trading days (Task 0) and index data
-(Task 3: python pipeline/fetch_indices.py).
+Requires: local stock history and index data
+(Task 3: python pipeline/fetch_indices.py). Fast mode lowers precision
+(main board, top 1500 by turnover, holding 5/10 days, validation window)
+to keep a routine run well under one hour.
 """
 from __future__ import annotations
 
@@ -38,7 +41,7 @@ WINDOWS = [
 ]
 
 
-def _config(strategy_id: str, with_regime: bool) -> dict:
+def _config(strategy_id: str, with_regime: bool, fast: bool) -> dict:
     resonance = {
         "enabled": True,
         "sub_strategies": ["b1", "volume_new_high", "high_52w_momentum"],
@@ -53,17 +56,29 @@ def _config(strategy_id: str, with_regime: bool) -> dict:
         "bottom_stock_pos_cap": 30,
     }
     return {
-        "global": {"adjust": "qfq", "top_m": 3000, "n_turnover_days": 43, "markets": ["main", "gem", "star", "bse"]},
+        "global": {
+            "adjust": "qfq",
+            "top_m": 1500 if fast else 3000,
+            "n_turnover_days": 43,
+            "markets": ["main"] if fast else ["main", "gem", "star", "bse"],
+        },
         "strategies": {strategy_id: resonance if strategy_id == "resonance" else {}},
     }
 
 
-def main(only_windows: list[str] | None = None, only_runs: list[str] | None = None) -> None:
+def main(
+    only_windows: list[str] | None = None,
+    only_runs: list[str] | None = None,
+    fast: bool = False,
+) -> None:
     rows: list[dict] = []
     out_dir = _ROOT / "data" / "resonance_verification"
     out_dir.mkdir(parents=True, exist_ok=True)
     windows = [item for item in WINDOWS if only_windows is None or item[2] in only_windows]
     runs = [item for item in RUNS if only_runs is None or item[1] in only_runs]
+    if fast and only_windows is None:
+        windows = [item for item in WINDOWS if item[2] == "validation"]
+    holding_periods = [5, 10] if fast else HOLDING_PERIODS
     for start, end, phase in windows:
         for strategy_id, label in runs:
             try:
@@ -71,8 +86,8 @@ def main(only_windows: list[str] | None = None, only_runs: list[str] | None = No
                     strategy_id=strategy_id,
                     start_date=start,
                     end_date=end,
-                    holding_periods=HOLDING_PERIODS,
-                    config=_config(strategy_id, with_regime="full" in label),
+                    holding_periods=holding_periods,
+                    config=_config(strategy_id, with_regime="full" in label, fast=fast),
                 )
                 result = run_backtest(f"verify-{phase}-{label}", request)
                 metrics = result.metrics
@@ -109,8 +124,9 @@ def _append_row(out_dir: Path, row: dict) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="resonance 校准/验证回测")
+    parser = argparse.ArgumentParser(description="resonance calibration/validation backtests")
     parser.add_argument("--windows", nargs="*", choices=["calibration-1", "calibration-2", "validation"], default=None)
-    parser.add_argument("--runs", nargs="*", default=None, help="标签子集，如 baseline-b1 resonance-full")
+    parser.add_argument("--runs", nargs="*", default=None, help="label subset, e.g. baseline-b1 resonance-full")
+    parser.add_argument("--full", action="store_true", help="full study: 3 windows, all boards, top3000, 5/10/20 days")
     args = parser.parse_args()
-    main(only_windows=args.windows, only_runs=args.runs)
+    main(only_windows=args.windows, only_runs=args.runs, fast=not args.full)

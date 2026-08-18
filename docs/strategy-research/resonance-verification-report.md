@@ -9,6 +9,10 @@
 - 已跑窗口：calibration-1（2023-01-03→2024-06-28，359 信号日）、validation（2025-07-01→2026-08-18，277 信号日）；calibration-2（2024-07→2025-06）待运行（脚本 `scripts/run_resonance_verification.py --windows calibration-2`）。
 - 原始结果：`data/resonance_verification/summary.csv` 与 `runs.jsonl`（本地数据，未入库）。
 
+## 性能调整（2026-08-19，用户要求）
+
+完整研究（3 窗口 × 5 策略组）耗时约 2 小时。按用户要求，日常运行默认改为 **fast 模式**：只跑 validation 窗口、仅主板、`top_m=1500`、持有期 5/10 日，预计 1 小时以内；完整研究用 `--full` 显式开启。快速模式会降低样本覆盖面与精准性，适合日常健康检查，正式结论以 `--full` 结果为准。
+
 ## 结果
 
 ### calibration-1（2023-01 → 2024-06，弱市/震荡）

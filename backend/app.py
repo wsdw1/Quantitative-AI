@@ -182,6 +182,7 @@ _ai_score_jobs: dict[str, AIScoreJobStatus] = {}
 _ai_jobs_lock = threading.Lock()
 _backtest_runs: dict[str, BacktestStatus] = {}
 _backtest_cancel_events: dict[str, threading.Event] = {}
+_backtest_threads: dict[str, threading.Thread] = {}
 _backtests_lock = threading.Lock()
 
 
@@ -755,12 +756,14 @@ def create_backtest(request: BacktestRunRequest) -> BacktestStatus:
         _backtest_runs[backtest_id] = status
         _backtest_cancel_events[backtest_id] = threading.Event()
         _persist_backtest(status, request_payload)
-    threading.Thread(
+    thread = threading.Thread(
         target=_run_backtest_background,
         args=(backtest_id, request),
         daemon=True,
         name=f"backtest-{backtest_id}",
-    ).start()
+    )
+    thread.start()
+    _backtest_threads[backtest_id] = thread
     return status
 
 
