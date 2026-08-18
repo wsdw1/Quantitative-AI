@@ -298,7 +298,7 @@ class AStockDataFetcher:
         result["date"] = pd.to_datetime(result["date"], errors="coerce")
         for col in ["open", "close", "high", "low", "volume", "amount", "pct_chg", "change", "turnover"]:
             if col in result.columns:
-                result[col] = pd.to_numeric(result[col], errors="coerce")
+                result[col] = pd.to_numeric(result[col], errors="coerce").fillna(0.0)
             else:
                 result[col] = 0.0
 
@@ -499,24 +499,18 @@ class AStockDataFetcher:
 
         TUShare explicitly recommends querying ``daily`` by trade date. Existing
         qfq history is rebased only when the latest adjustment factor changes.
-        An empty database is built the same way: fetch every trade date in the
-        window via ``daily`` + ``adj_factor`` instead of one pro_bar per stock.
         """
         self._check_cancelled()
         requested = {str(symbol).zfill(6) for symbol in symbols}
         existing_codes = price_codes(adjust)
         missing_codes = sorted(requested - existing_codes)
         _, latest_date, _ = price_data_signature(adjust)
-        if adjust not in {"qfq", "hfq", "bfq"}:
-            logger.info("不支持的复权方式，回退到单票历史抓取")
+        if not latest_date or adjust not in {"qfq", "hfq", "bfq"}:
+            logger.info("SQLite 尚无可用基准行情，回退到单票历史抓取")
             return sorted(requested)
 
-        cached_latest = pd.Timestamp(latest_date) if latest_date else None
-        if cached_latest is None:
-            logger.info("SQLite 无基准行情，直接按交易日批量构建全市场历史")
-            update_start = pd.Timestamp(start_date)
-        else:
-            update_start = max(cached_latest + timedelta(days=1), pd.Timestamp(start_date))
+        cached_latest = pd.Timestamp(latest_date)
+        update_start = max(cached_latest + timedelta(days=1), pd.Timestamp(start_date))
         update_end = pd.Timestamp(end_date)
         if update_start > update_end:
             logger.info("全市场行情已是最新，无需调用日线接口")
@@ -539,7 +533,7 @@ class AStockDataFetcher:
         logger.info("启用 TUShare 全市场快速增量：%d 个交易日，只需按日期批量请求", len(trade_dates))
 
         previous_factors: dict[str, float] = {}
-        if adjust == "qfq" and cached_latest is not None:
+        if adjust == "qfq":
             previous = self._call_tushare(pro.adj_factor, trade_date=cached_latest.strftime("%Y%m%d"))
             if previous is not None and not previous.empty:
                 previous_factors = dict(zip(previous["ts_code"].str[:6], previous["adj_factor"].astype(float)))
@@ -570,7 +564,7 @@ class AStockDataFetcher:
         if not daily_batches:
             return missing_codes
 
-        if adjust == "qfq" and cached_latest is not None and previous_factors and latest_factors:
+        if adjust == "qfq" and previous_factors and latest_factors:
             ratios = {
                 code: previous_factors[code] / latest_factors[code]
                 for code in existing_codes
@@ -639,7 +633,6 @@ class AStockDataFetcher:
         from pipeline.providers import clear_price_cache
 
         clear_price_cache()
-        missing_codes = sorted(requested - price_codes(adjust))
         logger.info("全市场快速增量完成：新增 %d 个交易日，仍需补历史 %d 只", len(daily_batches), len(missing_codes))
         if not missing_codes:
             self._reset_run_state()

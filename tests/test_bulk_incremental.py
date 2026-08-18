@@ -51,6 +51,20 @@ class _TestFetcher(AStockDataFetcher):
 
 
 class BulkIncrementalTests(unittest.TestCase):
+    def test_normalize_history_dataframe_fills_missing_pct_chg(self) -> None:
+        raw = pd.DataFrame(
+            [
+                {
+                    "date": "2026-07-10", "open": 5.5, "high": 6.2, "low": 5.4, "close": 6.0,
+                    "pct_chg": None, "change": None, "turnover": None, "volume": 1000.0, "amount": 6000.0,
+                }
+            ]
+        )
+        normalized = AStockDataFetcher._normalize_history_dataframe(raw)
+        self.assertEqual(float(normalized["pct_chg"].iloc[-1]), 0.0)
+        self.assertEqual(float(normalized["change"].iloc[-1]), 0.0)
+        self.assertEqual(float(normalized["turnover"].iloc[-1]), 0.0)
+
     def test_batch_progress_log_can_write_pipeline_status(self) -> None:
         original_path = database.DB_PATH
         with tempfile.TemporaryDirectory() as tmp:
@@ -131,29 +145,6 @@ class BulkIncrementalTests(unittest.TestCase):
                 self.assertIn("增量行情预处理进度 1/1", messages)
                 self.assertIn("增量行情按股票整理进度 1/1", messages)
                 self.assertIn("SQLite 行情同步进度 1/1", messages)
-            finally:
-                database.DB_PATH = original_path
-
-    def test_empty_db_builds_full_window_via_bulk_daily(self) -> None:
-        """空库时直接按交易日批量建库，而不是把所有股票退回逐股抓取。"""
-        original_path = database.DB_PATH
-        with tempfile.TemporaryDirectory() as tmp:
-            database.DB_PATH = Path(tmp) / "test.db"
-            try:
-                fetcher = _TestFetcher()
-
-                missing = fetcher.bulk_incremental_update(
-                    ["000001"],
-                    start_date="20260701",
-                    end_date="20260710",
-                    adjust="qfq",
-                )
-
-                self.assertEqual(missing, [])
-                loaded = database.load_daily_prices("qfq", 1, ["000001"])
-                self.assertIn("000001", loaded)
-                frame = loaded["000001"]
-                self.assertAlmostEqual(float(frame.loc[pd.Timestamp("2026-07-10"), "close"]), 6.0)
             finally:
                 database.DB_PATH = original_path
 
