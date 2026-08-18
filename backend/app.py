@@ -31,6 +31,9 @@ from ai_scoring.knowledge import (
 )
 from backtest.schemas import BacktestRequest as BacktestServiceRequest
 from backtest.service import run_backtest
+from entry_analysis import build_daily_entry_plan
+from market_analysis import calculate_market_breadth
+from market_analysis.positions import board_positions, industry_positions, market_positions
 from pipeline.cancellation import RunCancelledError
 from pipeline.runtime import DATA_MODES, run_pipeline
 from pipeline.select_stock import normalize_strategy_config
@@ -112,6 +115,7 @@ class BacktestRunRequest(BaseModel):
     start_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     end_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
     holding_days: int = Field(default=5, ge=1, le=60)
+    holding_periods: list[int] = Field(default_factory=list)
     config: ConfigPayload | None = None
 
 
@@ -121,6 +125,7 @@ class BacktestStatus(BaseModel):
     start_date: str
     end_date: str
     holding_days: int
+    holding_periods: list[int] = Field(default_factory=list)
     status: Literal["queued", "running", "cancelling", "success", "failed", "cancelled"]
     stage: str = "等待开始"
     progress: float = 0
@@ -367,6 +372,7 @@ def _run_backtest_background(backtest_id: str, request: BacktestRunRequest) -> N
             start_date=request.start_date,
             end_date=request.end_date,
             holding_days=request.holding_days,
+            holding_periods=request.holding_periods,
             config=config_payload,
         )
         result = run_backtest(
@@ -557,6 +563,52 @@ def get_strategies() -> dict[str, Any]:
     }
 
 
+@app.get("/api/market/breadth")
+def get_market_breadth(
+    as_of: str | None = None,
+    adjust: str | None = None,
+    markets: str | None = None,
+) -> dict[str, Any]:
+    config = _load_config()
+    resolved_adjust = adjust or str(config.global_.get("adjust", "qfq"))
+    resolved_markets = (
+        [item.strip() for item in markets.split(",") if item.strip()]
+        if markets
+        else list(config.global_.get("markets") or ["main", "gem", "star", "bse"])
+    )
+    allowed_markets = {"main", "gem", "star", "bse"}
+    if not resolved_markets or not set(resolved_markets).issubset(allowed_markets):
+        raise HTTPException(status_code=400, detail="markets 包含未知板块")
+    try:
+        return calculate_market_breadth(
+            adjust=resolved_adjust,
+            end_date=as_of,
+            markets=resolved_markets,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("market breadth calculation failed")
+        raise HTTPException(status_code=500, detail=f"市场宽度计算失败: {exc}") from exc
+
+
+@app.get("/api/market/positions")
+def get_market_positions(as_of: str | None = None) -> dict[str, Any]:
+    try:
+        market = market_positions(as_of=as_of)
+        boards = board_positions(as_of=as_of)
+        industries = industry_positions(as_of=as_of)
+        return {
+            "available": market["available"],
+            "as_of": as_of,
+            "regime": market.get("regime", "neutral"),
+            "market": market.get("market", []),
+            "boards": boards.get("boards", {}),
+            "industries": industries.get("industries", []),
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("market positions calculation failed")
+        raise HTTPException(status_code=500, detail=f"市场位置计算失败: {exc}") from exc
+
+
 @app.post("/api/runs", response_model=RunStatus)
 def create_run(request: RunRequest) -> RunStatus:
     if request.data_mode not in DATA_MODES:
@@ -639,6 +691,12 @@ def get_latest_candidates(strategy_id: str | None = None) -> dict[str, Any]:
         path = ROOT / "data" / "candidates" / f"candidates_latest_{strategy_id}.json"
         if path.exists():
             return _read_json(path)
+        return {
+            "run_date": "",
+            "pick_date": "",
+            "candidates": [],
+            "meta": {"strategy": strategy_id, "status": "not_found"},
+        }
     return _read_json(LATEST_CANDIDATES)
 
 
@@ -654,6 +712,16 @@ def create_backtest(request: BacktestRunRequest) -> BacktestStatus:
     available = {item.id for item in list_strategies()}
     if request.strategy_id not in available:
         raise HTTPException(status_code=400, detail=f"未知策略: {request.strategy_id}")
+    holding_periods = sorted(set(request.holding_periods or [request.holding_days]))
+    if not holding_periods or any(value < 1 or value > 60 for value in holding_periods):
+        raise HTTPException(status_code=400, detail="持有周期必须在 1 至 60 个交易日之间")
+    if len(holding_periods) > 10:
+        raise HTTPException(status_code=400, detail="一次最多选择 10 个持有周期")
+    request = (
+        request.model_copy(update={"holding_days": max(holding_periods), "holding_periods": holding_periods})
+        if hasattr(request, "model_copy")
+        else request.copy(update={"holding_days": max(holding_periods), "holding_periods": holding_periods})
+    )
 
     with _runs_lock:
         active_pipeline = next(
@@ -679,6 +747,7 @@ def create_backtest(request: BacktestRunRequest) -> BacktestStatus:
         start_date=request.start_date,
         end_date=request.end_date,
         holding_days=request.holding_days,
+        holding_periods=request.holding_periods,
         status="queued",
     )
     request_payload = request.model_dump(by_alias=True) if hasattr(request, "model_dump") else request.dict(by_alias=True)
@@ -822,6 +891,53 @@ def get_stock_kline(code: str, adjust: str = "qfq", limit: int = 180) -> dict[st
         df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.strftime("%Y-%m-%d")
     df = df.fillna(0)
     return {"code": safe_code, "rows": df.to_dict(orient="records")}
+
+
+@app.get("/api/stocks/{code}/entry-plan")
+def get_stock_entry_plan(
+    code: str,
+    adjust: str = "qfq",
+    as_of: str | None = None,
+    account_value: float = 100_000,
+    risk_pct: float = 0.5,
+    reward_risk: float = 1.0,
+    atr_window: int = 14,
+    swing_window: int = 2,
+    review_bars: int = 60,
+) -> dict[str, Any]:
+    safe_code = str(code).zfill(6)
+    database_data = load_daily_prices(adjust, 1, [safe_code], end_date=as_of)
+    frame = database_data.get(safe_code)
+    if frame is None or frame.empty:
+        kline = get_stock_kline(safe_code, adjust=adjust, limit=1000)
+        frame = pd.DataFrame(kline["rows"])
+
+    stock_name = ""
+    stocks = load_stocks()
+    if not stocks.empty:
+        code_column = next((item for item in ["code", "代码", "symbol", "ts_code"] if item in stocks.columns), None)
+        name_column = next((item for item in ["name", "名称", "股票简称"] if item in stocks.columns), None)
+        if code_column and name_column:
+            normalized_codes = stocks[code_column].astype(str).str.extract(r"(\d{6})", expand=False).fillna("")
+            match = stocks.loc[normalized_codes == safe_code]
+            if not match.empty:
+                stock_name = str(match.iloc[0][name_column])
+
+    try:
+        return build_daily_entry_plan(
+            frame,
+            code=safe_code,
+            name=stock_name,
+            as_of=as_of,
+            account_value=account_value,
+            risk_pct=risk_pct,
+            reward_risk=reward_risk,
+            atr_window=atr_window,
+            swing_window=swing_window,
+            review_bars=review_bars,
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.get("/api/ai/sector-scores/latest")
