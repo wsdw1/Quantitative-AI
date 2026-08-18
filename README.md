@@ -8,12 +8,15 @@
 - `backend/app.py` 提供本地 FastAPI 服务。
 - `web/` 提供 Vue 3 + Vite + TypeScript 控制台。
 - `/backtest` 提供独立的逐日选股回测页面和收益排行。
-- 多策略架构支持 `b1` 和 `volume_new_high`，策略通过统一注册表和标准 OHLCV 数据调用。
+- 多策略架构支持 `b1`、`volume_new_high` 和 `high_52w_momentum`，策略通过统一注册表和标准 OHLCV 数据调用。
 - B1 策略支持 KDJ、日线均线多头、周线确认、MACD、成交量过滤、板块过滤。
 - 缩量新高策略实现 `-corr(HIGH, VOLUME, 10) * rank(stddev(HIGH, 10))`，并支持新高窗口、缩量阈值和最低评分参数。
+- 52 周新高动量策略筛选接近一年高点、半年动量为正且站上趋势均线的股票，并按高点接近度与动量截面排名合成评分。
+- 候选股详情逐日扫描最近 60 个交易日的“趋势 -> 截取 -> 入场”历史机会，展示每个入场点当时的结构止损、目标盈亏比及后续结果，并把点标在实际交易日；该结果是历史复盘，不是当前买入推荐。[实现边界与 SMT 数据要求](docs/SMT_TREND_CAPTURE.md)单独说明。
 - 数据模式支持 `existing`、`incremental`、`refresh`、`cache-only`。
 - DeepSeek AI 评分支持赛道景气度分析和候选股“超景气价值投机”评分。
 - SQLite 会保存股票列表、TUShare 日线、任务记录、候选结果、AI 评分和研究素材；CSV/YAML 保留为缓存与可编辑配置。
+- [可选策略研究索引](docs/strategy-research/README.md)整理了价格动量多因子、质量价值动量、F-Score、低波动与行业景气共振的实现条件和回测重点。
 
 ## 安装
 
@@ -21,6 +24,12 @@ Python 依赖：
 
 ```bash
 pip install -r requirements.txt
+```
+
+运行 Python 测试时再安装开发依赖：
+
+```bash
+pip install -r requirements-dev.txt
 ```
 
 前端依赖：
@@ -60,6 +69,7 @@ python run_all.py --data-mode existing --no-dashboard
 ```bash
 python run_all.py --data-mode existing --strategy-id b1 --no-dashboard
 python run_all.py --data-mode existing --strategy-id volume_new_high --no-dashboard
+python run_all.py --data-mode existing --strategy-id high_52w_momentum --no-dashboard
 ```
 
 增量更新：
@@ -143,6 +153,16 @@ python start_web.py --prod
 http://127.0.0.1:8000
 ```
 
+## 桌面版（pywebview）
+
+用原生窗口内嵌上面的 Vue 控制台，双击即可使用：
+
+- `python desktop_app.py`，或直接双击 `启动桌面版.bat`
+- 首次启动会自动检查并构建前端（需要 Node.js，构建一次后直接复用 `web/dist`）
+- 若 8000 端口已有本项目后端则直接复用；否则自动启动并随窗口关闭而停止
+- `python desktop_app.py --no-gui` 只启动后端做自检后退出（调试用）
+- 依赖：`pywebview`（已加入 requirements.txt），Windows 需系统自带 WebView2 运行时
+
 ## DeepSeek AI 评分
 
 AI 评分配置位于 `config/ai_scoring.yaml`。评分结果会写入 `data/ai_scoring/`，该目录已加入 `.gitignore`。
@@ -209,7 +229,7 @@ python scripts/migrate_to_sqlite.py
 http://127.0.0.1:8000/backtest
 ```
 
-回测页与选股控制台使用独立路由。可以选择 B1 或缩量新高策略、开始/结束日期、持有交易日、板块、流动性池和策略参数。任务会一次性加载所需行情并预计算指标，再按每个交易日运行策略；状态、日志、统计摘要和逐笔结果均保存到 `data/oversell.db`，刷新页面后可以恢复。
+回测页与选股控制台使用独立路由。可以选择 B1、缩量新高或 52 周新高动量策略、开始/结束日期、板块、流动性池和策略参数，并可同时选择 D3、D5、D10、D15、D20 等多个持有周期。一次任务只扫描一轮信号，再分别统计各周期收益。策略指标会按行情版本和指标参数写入 `data/cache/backtest_indicators/`；相同指标配置再次回测时直接复用，调整持有周期或筛选阈值不会重复预计算。缓存目录不会进入 Git，每个策略最多保留两个版本。状态、日志、统计摘要和逐笔结果均保存到 `data/oversell.db`，刷新页面后可以恢复。
 
 交易与统计口径：
 
@@ -246,7 +266,9 @@ scripts\test_browser.bat
 - `GET /api/config` / `PUT /api/config`：读取或保存全局配置与策略配置。
 - `POST /api/runs`：启动任务，可传 `strategy_id`。
 - `POST /api/runs/{run_id}/cancel`：终止正在运行的任务。
+- `GET /api/market/breadth`：读取市场宽度、风险状态和仓位参考。
 - `GET /api/candidates/latest?strategy_id=b1`：读取指定策略最新结果。
+- `GET /api/stocks/{code}/entry-plan`：使用 SQLite 日线逐日扫描最近 60 个交易日的历史截取/入场点，并评价止盈止损结果；可用 `review_bars` 调整观察窗口。
 - `GET /api/ai/sector-scores/latest` / `POST /api/ai/sector-scores/refresh`：读取或更新赛道景气度评分。
 - `GET /api/ai/candidate-scores/latest` / `POST /api/ai/candidate-scores/score`：读取或生成候选股 AI 评分。
 - `GET /api/ai/model`：读取当前 DeepSeek 模型、思考强度和联网检索默认配置。
@@ -265,3 +287,17 @@ scripts\test_browser.bat
 ## 风险提示
 
 本项目仅用于研究与选股，不构成投资建议。
+
+## resonance 多策略共振（2026-08-19 新增）
+
+- 元策略并行运行子策略（默认 b1、volume_new_high、high_52w_momentum），按命中次数共振合并（`min_hits=2`），并叠加市场/板块/行业位置风控。
+- 位置定义：收盘价在近 252 交易日的分位；风险区 ≥85 提示风险（高位个股标记并降权 0.5 倍）；抄底区 ≤15 且当日反转确认（收涨 + 量比 ≥1.2）时启用超跌抄底池。
+- 运行命令：
+
+```bash
+python run_all.py --data-mode existing --strategy-id resonance --no-dashboard
+python -m pipeline.fetch_indices --codes all
+```
+
+- 新增接口：`GET /api/market/positions`（市场指数/板块/申万行业位置与状态）。
+- 阈值依据 `docs/strategy-research/scripts/` 下的胜率研究脚本；校准/验证结论见 `data/resonance_verification/summary.csv`（未生成前须标注"样本外未验证"）。
