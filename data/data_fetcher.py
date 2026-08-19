@@ -16,7 +16,9 @@ import tushare as ts
 
 from pipeline.cancellation import RunCancelledError, raise_if_cancelled
 from storage.database import (
+    price_codes_with_date,
     price_codes,
+    price_date_coverage,
     price_data_signature,
     rescale_qfq_history,
     upsert_price_batch,
@@ -513,6 +515,19 @@ class AStockDataFetcher:
         update_start = max(cached_latest + timedelta(days=1), pd.Timestamp(start_date))
         update_end = pd.Timestamp(end_date)
         if update_start > update_end:
+            # 最新交易日可能只入库了部分股票（例如收盘后数据分批发布），
+            # 不能把"存在一个更晚日期"当成全市场已是最新，否则会漏掉补抓。
+            coverage = price_date_coverage(adjust, latest_date)
+            if coverage < len(requested) * 0.90:
+                missing_latest = sorted(requested - price_codes_with_date(adjust, latest_date))
+                logger.warning(
+                    "最新交易日 %s 覆盖不足（%d/%d 只），需补抓 %d 只股票的该交易日行情",
+                    latest_date,
+                    coverage,
+                    len(requested),
+                    len(missing_latest),
+                )
+                return sorted(set(missing_codes) | set(missing_latest))
             logger.info("全市场行情已是最新，无需调用日线接口")
             return missing_codes
 

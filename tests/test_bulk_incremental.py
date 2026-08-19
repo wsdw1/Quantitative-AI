@@ -51,6 +51,54 @@ class _TestFetcher(AStockDataFetcher):
 
 
 class BulkIncrementalTests(unittest.TestCase):
+    def test_bulk_incremental_backfills_partial_latest_trade_date(self) -> None:
+        original_path = database.DB_PATH
+        with tempfile.TemporaryDirectory() as tmp:
+            database.DB_PATH = Path(tmp) / "test.db"
+            try:
+                codes = [f"{index:06d}" for index in range(1, 11)]
+                history = pd.DataFrame(
+                    [{"open": 1.0, "high": 2.0, "low": 1.0, "close": 2.0, "volume": 10.0, "amount": 20.0}],
+                    index=pd.to_datetime(["2026-07-09"]),
+                )
+                latest = history.copy()
+                latest.index = pd.to_datetime(["2026-07-10"])
+                database.upsert_price_batch({code: history for code in codes}, "qfq")
+                # 只有 2 只股票入库了 07-10，其余 8 只仍停在 07-09 —— 模拟盘中/收盘后分批发布。
+                database.upsert_price_batch({codes[0]: latest, codes[1]: latest}, "qfq")
+
+                missing = _TestFetcher().bulk_incremental_update(
+                    codes, start_date="20260701", end_date="20260710", adjust="qfq"
+                )
+
+                # 不能把"仅部分股票有最新日"当作全市场已最新；应把缺最新日的 8 只退回补抓。
+                self.assertEqual(len(missing), 8)
+                self.assertNotIn(codes[0], missing)
+                self.assertNotIn(codes[1], missing)
+                self.assertIn(codes[2], missing)
+            finally:
+                database.DB_PATH = original_path
+
+    def test_bulk_incremental_skips_when_latest_date_fully_covered(self) -> None:
+        original_path = database.DB_PATH
+        with tempfile.TemporaryDirectory() as tmp:
+            database.DB_PATH = Path(tmp) / "test.db"
+            try:
+                codes = [f"{index:06d}" for index in range(1, 11)]
+                frame = pd.DataFrame(
+                    [{"open": 1.0, "high": 2.0, "low": 1.0, "close": 2.0, "volume": 10.0, "amount": 20.0}],
+                    index=pd.to_datetime(["2026-07-10"]),
+                )
+                database.upsert_price_batch({code: frame for code in codes}, "qfq")
+
+                missing = _TestFetcher().bulk_incremental_update(
+                    codes, start_date="20260701", end_date="20260710", adjust="qfq"
+                )
+
+                self.assertEqual(missing, [])
+            finally:
+                database.DB_PATH = original_path
+
     def test_normalize_history_dataframe_fills_missing_pct_chg(self) -> None:
         raw = pd.DataFrame(
             [

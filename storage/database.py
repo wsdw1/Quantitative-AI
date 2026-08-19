@@ -955,6 +955,28 @@ def price_data_signature(adjust: str) -> tuple[int, str | None, str | None]:
     return int(row["total"] or 0), row["latest_date"], row["updated_at"]
 
 
+def price_date_coverage(adjust: str, trade_date: str) -> int:
+    """统计某个交易日在库中有行情的股票数量（用于判断全市场是否真的已是最新）。"""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT code) AS n FROM daily_prices WHERE adjust=? AND trade_date=?",
+            (adjust or "bfq", str(trade_date)),
+        ).fetchone()
+    return int(row["n"] or 0)
+
+
+def price_codes_with_date(adjust: str, trade_date: str) -> set[str]:
+    """返回某个交易日已有行情的全部股票代码。"""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT DISTINCT code FROM daily_prices WHERE adjust=? AND trade_date=?",
+            (adjust or "bfq", str(trade_date)),
+        ).fetchall()
+    return {str(row["code"]) for row in rows}
+
+
 def market_turnover_snapshot(adjust: str = "qfq", trade_date: str | None = None) -> dict[str, Any]:
     """Return full-market turnover and the scoring coefficient for one trading day."""
     init_db()
