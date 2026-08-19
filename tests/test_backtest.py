@@ -16,7 +16,7 @@ from backtest.service import run_backtest
 from fastapi.testclient import TestClient
 from pipeline.cancellation import RunCancelledError
 from pipeline.schemas import Candidate
-from pipeline.Selector import compute_weekly_ma
+from pipeline.selector import compute_weekly_ma
 from strategies.base import StrategyContext, StrategyMeta
 
 

@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from pipeline.schemas import Candidate
 from pipeline.cancellation import RunCancelledError
-from pipeline.Selector import (
+from pipeline.selector import (
     compute_kdj,
     compute_macd,
     compute_volume_ratio,
