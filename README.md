@@ -4,7 +4,7 @@
 
 ## 功能
 
-- `run_all.py` 保留为命令行入口。
+- `scripts/run_all.py` 保留为命令行入口。
 - `backend/app.py` 提供本地 FastAPI 服务。
 - `web/` 提供 Vue 3 + Vite + TypeScript 控制台。
 - `/backtest` 提供独立的逐日选股回测页面和收益排行。
@@ -55,27 +55,27 @@ DEEPSEEK_API_KEY=你的DeepSeek API Key
 交互式选择数据模式：
 
 ```bash
-python run_all.py --no-dashboard
+python scripts/run_all.py --no-dashboard
 ```
 
 直接使用本地数据：
 
 ```bash
-python run_all.py --data-mode existing --no-dashboard
+python scripts/run_all.py --data-mode existing --no-dashboard
 ```
 
 指定策略运行：
 
 ```bash
-python run_all.py --data-mode existing --strategy-id b1 --no-dashboard
-python run_all.py --data-mode existing --strategy-id volume_new_high --no-dashboard
-python run_all.py --data-mode existing --strategy-id high_52w_momentum --no-dashboard
+python scripts/run_all.py --data-mode existing --strategy-id b1 --no-dashboard
+python scripts/run_all.py --data-mode existing --strategy-id volume_new_high --no-dashboard
+python scripts/run_all.py --data-mode existing --strategy-id high_52w_momentum --no-dashboard
 ```
 
 增量更新：
 
 ```bash
-python run_all.py --data-mode incremental --no-dashboard
+python scripts/run_all.py --data-mode incremental --no-dashboard
 ```
 
 增量模式会优先按交易日调用 TUShare 全市场 `daily` 和 `adj_factor` 接口，一般不再循环请求 5,500 只股票。只有数据库中缺少完整历史的新股才会回退到逐票补抓。前复权基准发生变化时，系统会自动重标旧行情。
@@ -83,7 +83,7 @@ python run_all.py --data-mode incremental --no-dashboard
 强制重拉：
 
 ```bash
-python run_all.py --data-mode refresh --no-dashboard
+python scripts/run_all.py --data-mode refresh --no-dashboard
 ```
 
 `refresh` 会逐票重建历史缓存；在每分钟约 200 次的权限下，5,500 只股票理论上需要约 28 分钟。日常运行建议使用 `incremental`，调试策略建议使用 `existing`。
@@ -91,7 +91,7 @@ python run_all.py --data-mode refresh --no-dashboard
 仅使用缓存：
 
 ```bash
-python run_all.py --data-mode cache-only --no-dashboard
+python scripts/run_all.py --data-mode cache-only --no-dashboard
 ```
 
 ## 邮件通知
@@ -122,7 +122,7 @@ python -m notify.mailer verification
 跑完整个选股流程后自动发送结果：
 
 ```bash
-python run_all.py --data-mode existing --no-dashboard --send-email
+python scripts/run_all.py --data-mode existing --no-dashboard --send-email
 ```
 
 ## 每日线上自动执行（GitHub Actions）
@@ -212,13 +212,13 @@ python start_web.py
 Windows 可以直接双击：
 
 ```text
-start_console.bat
+scripts\start_console.bat
 ```
 
 停止后台服务：
 
 ```text
-stop_console.bat
+scripts\stop_console.bat
 ```
 
 开发模式会同时启动：
@@ -264,10 +264,10 @@ http://127.0.0.1:8000
 
 用原生窗口内嵌上面的 Vue 控制台，双击即可使用：
 
-- `python desktop_app.py`，或直接双击 `启动桌面版.bat`
+- `python scripts/desktop_app.py`，或直接双击 `scripts\desktop_app.py`
 - 首次启动会自动检查并构建前端（需要 Node.js，构建一次后直接复用 `web/dist`）
 - 若 8000 端口已有本项目后端则直接复用；否则自动启动并随窗口关闭而停止
-- `python desktop_app.py --no-gui` 只启动后端做自检后退出（调试用）
+- `python scripts/desktop_app.py --no-gui` 只启动后端做自检后退出（调试用）
 - 依赖：`pywebview`（已加入 requirements.txt），Windows 需系统自带 WebView2 运行时
 
 ## DeepSeek AI 评分
@@ -402,7 +402,7 @@ scripts\test_browser.bat
 - 运行命令：
 
 ```bash
-python run_all.py --data-mode existing --strategy-id resonance --no-dashboard
+python scripts/run_all.py --data-mode existing --strategy-id resonance --no-dashboard
 python -m pipeline.fetch_indices --codes all
 ```
 
