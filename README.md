@@ -112,10 +112,10 @@ MAIL_TO=收件人邮箱
 python -m notify.mailer test
 ```
 
-发送最新选股结果 / 共振策略回测汇总：
+发送每日综合报告（市场环境 + 四个策略选股结果，每个策略展示评分前 10）：
 
 ```bash
-python -m notify.mailer candidates
+python scripts/daily_report.py --data-mode existing
 python -m notify.mailer verification
 ```
 
@@ -132,7 +132,8 @@ python run_all.py --data-mode existing --no-dashboard --send-email
 - 周一至周五北京时间 16:30 自动触发（可手动 `workflow_dispatch` 触发）
 - 自动判断是否交易日，非交易日不发邮件
 - 首次运行全量重建行情库，之后通过 Actions 缓存每天只增量补数据
-- 选股完成后把候选结果发送到邮箱；失败会自动发一封错误通知邮件
+- 每日邮件为 HTML 综合报告：市场环境（指数位置分位、风险状态、市场宽度与建议仓位）+ 多策略共振 / B1 / 缩量新高 / 52周新高动量 四个策略各自评分前 10 的候选
+- 失败会自动发一封错误通知邮件
 
 线上所需密钥以 GitHub Secrets 形式配置（仓库 Settings → Secrets and variables → Actions）：
 

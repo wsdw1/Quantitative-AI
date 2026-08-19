@@ -35,6 +35,7 @@ ROOT = Path(__file__).resolve().parent.parent
 ENV_FILE = ROOT / ".env.local"
 CANDIDATES_FILE = ROOT / "data" / "candidates" / "candidates_latest.json"
 VERIFICATION_SUMMARY = ROOT / "data" / "resonance_verification" / "summary.csv"
+ALL_STRATEGY_IDS = ["resonance", "b1", "volume_new_high", "high_52w_momentum"]
 
 _DEFAULT_HOST = "smtp.qq.com"
 _DEFAULT_PORT = 465
@@ -115,54 +116,34 @@ def _load_latest_candidates() -> dict:
     return json.loads(CANDIDATES_FILE.read_text(encoding="utf-8"))
 
 
-def build_candidates_report(top: int = 20) -> tuple[str, str]:
-    """把最新选股结果格式化成纯文本 + HTML 两种内容。"""
-    data = _load_latest_candidates()
-    meta = data.get("meta", {})
-    pick_date = data.get("pick_date", "未知")
-    run_date = data.get("run_date", pick_date)
-    candidates = data.get("candidates", [])
-    strategy = meta.get("strategy", "")
-    strategy_name = meta.get("strategy_name", "")
-    scanned = meta.get("scanned", "-")
-    selected = meta.get("selected", len(candidates))
+def _load_all_candidates() -> dict[str, dict | None]:
+    """读取各策略最新的候选结果文件；缺失的策略返回 None。"""
+    out_dir = ROOT / "data" / "candidates"
+    result: dict[str, dict | None] = {}
+    for strategy_id in ALL_STRATEGY_IDS:
+        path = out_dir / f"candidates_latest_{strategy_id}.json"
+        if not path.exists():
+            logger.warning("缺少策略候选文件：%s", path)
+            result[strategy_id] = None
+            continue
+        try:
+            result[strategy_id] = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("读取策略候选文件失败 %s: %s", path, exc)
+            result[strategy_id] = None
+    return result
 
-    head_lines = [
-        f"选股日期：{pick_date}（任务运行于 {run_date}）",
-        f"策略：{strategy_name or strategy} ({strategy})",
-        f"扫描数量：{scanned} 只，命中数量：{selected} 只",
-        "",
-    ]
-    header = f"{'#':>3}  {'代码':>8}  {'名称':<8}  {'收盘':>8}  {'评分':>10}"
-    text_rows = [header, "-" * len(header)]
-    html_rows = []
-    for i, c in enumerate(candidates[:top], 1):
-        code = str(c.get("code", ""))
-        name = str(c.get("name", code))
-        close = float(c.get("close", 0) or 0)
-        score = float(c.get("score", 0) or 0)
-        text_rows.append(
-            f"{i:>3}  {code:>8}  {name[:8]:<8}  {close:>8.2f}  {score:>10.4f}"
-        )
-        html_rows.append(
-            f"<tr><td>{i}</td><td>{code}</td><td>{name}</td>"
-            f"<td>{close:.2f}</td><td>{score:.4f}</td></tr>"
-        )
-    if len(candidates) > top:
-        text_rows.append(f"... 共 {len(candidates)} 只，仅显示前 {top} 只")
-        html_rows.append(f'<tr><td colspan="5">… 共 {len(candidates)} 只，仅显示前 {top} 只</td></tr>')
 
-    text = "\n".join(head_lines + text_rows)
-    html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>
-<h3>量化选股结果</h3>
-<p>选股日期：{pick_date}（任务运行于 {run_date}）</p>
-<p>策略：{strategy_name or strategy} ({strategy})</p>
-<p>扫描数量：{scanned} 只，命中数量：{selected} 只</p>
-<table border="1" cellspacing="0" cellpadding="4" style="border-collapse:collapse">
-<tr><th>#</th><th>代码</th><th>名称</th><th>收盘</th><th>评分</th></tr>
-{''.join(html_rows)}
-</table></body></html>"""
-    return text, html
+def build_daily_report_data(top: int = 10) -> tuple[str, str]:
+    """构建每日综合报告：市场环境 + 全部策略选股结果。"""
+    from market_analysis.breadth import calculate_market_breadth  # noqa: PLC0415
+    from market_analysis.positions import market_positions  # noqa: PLC0415
+    from notify.report import build_daily_report  # noqa: PLC0415
+
+    candidates = _load_all_candidates()
+    market = market_positions()
+    breadth = calculate_market_breadth()
+    return build_daily_report(candidates, market=market, breadth=breadth, top=top)
 
 
 def build_verification_report() -> tuple[str, str]:
@@ -201,8 +182,8 @@ def build_verification_report() -> tuple[str, str]:
 
 
 def send_candidates_report(top: int = 20, to: str | None = None) -> str:
-    text, html = build_candidates_report(top=top)
-    subject = f"【quant】选股结果 {datetime.now():%Y-%m-%d}"
+    text, html = build_daily_report_data(top=top)
+    subject = f"【quant】每日策略与市场报告 {datetime.now():%Y-%m-%d}"
     return send_email(subject, body_text=text, body_html=html, to=to)
 
 

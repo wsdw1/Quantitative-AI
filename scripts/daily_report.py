@@ -13,6 +13,7 @@ scripts/daily_report.py
     python scripts/daily_report.py                        # 线上默认（增量 + 发邮件）
     python scripts/daily_report.py --data-mode existing   # 本地调试：直接用现有数据
     python scripts/daily_report.py --skip-trade-check     # 跳过交易日判断
+    python scripts/daily_report.py --top 10               # 每个策略邮件里显示前 10 只
 """
 from __future__ import annotations
 
@@ -62,6 +63,31 @@ def _send_error_email(subject: str, detail: str) -> None:
         logger.exception("发送错误通知邮件失败：%s", exc)
 
 
+def _run_other_strategies(pick_date: str | None) -> None:
+    """把 b1 / 缩量新高 / 52周新高动量 各跑一遍并保存候选文件。"""
+    from pipeline.select_stock import run as run_select  # noqa: PLC0415
+
+    for strategy_id in ("b1", "volume_new_high", "high_52w_momentum"):
+        logger.info("运行附加策略：%s（基准日期 %s）", strategy_id, pick_date or "自动")
+        run_select(pick_date=pick_date, strategy_id=strategy_id)
+
+
+def _ensure_index_data() -> None:
+    """拉取市场/行业指数日线，供市场位置分析使用。"""
+    import os  # noqa: PLC0415
+
+    import tushare as ts  # noqa: PLC0415
+
+    from pipeline.fetch_indices import run as run_fetch_indices  # noqa: PLC0415
+
+    token = os.environ.get("TUSHARE_TOKEN", "").strip()
+    if not token:
+        logger.warning("未检测到 TUSHARE_TOKEN，跳过指数数据拉取")
+        return
+    pro = ts.pro_api(token)
+    run_fetch_indices(pro=pro)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python scripts/daily_report.py", description="每日选股 + 邮件汇报")
     parser.add_argument(
@@ -77,6 +103,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--skip-trade-check", action="store_true",
         help="跳过交易日历判断（调试用）",
+    )
+    parser.add_argument(
+        "--top", type=int, default=10,
+        help="每个策略在邮件中显示的前 N 只候选（默认 10）",
     )
     args = parser.parse_args(argv)
 
@@ -101,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info("开始每日选股任务（data_mode=%s）", args.data_mode)
     try:
-        run_pipeline(data_mode=args.data_mode, no_dashboard=True)
+        result = run_pipeline(data_mode=args.data_mode, no_dashboard=True)
     except Exception as exc:  # noqa: BLE001
         logger.exception("每日选股流程执行失败")
         _send_error_email(
@@ -110,8 +140,20 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    pick_date = result.pick_date if result else None
     try:
-        to = send_candidates_report(to=args.mail_to)
+        _run_other_strategies(pick_date)
+        _ensure_index_data()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("附加策略或指数数据准备失败")
+        _send_error_email(
+            f"【quant】每日任务失败 {today}",
+            f"附加策略/指数数据准备失败：\n{exc}",
+        )
+        return 1
+
+    try:
+        to = send_candidates_report(top=args.top, to=args.mail_to)
         logger.info("选股结果邮件已发送到 %s", to)
         print(f"[OK] 选股结果已发送到 {to}")
     except Exception as exc:  # noqa: BLE001
