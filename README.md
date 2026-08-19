@@ -161,7 +161,7 @@ python scripts/daily_report.py --data-mode existing
 
 1. 打开仓库 https://github.com/wsdw1/work/settings/secrets/actions
 2. 找到 `TUSHARE_TOKEN` → **Update** → 粘贴新 token 保存
-3. 同步更新本地 `quant/.env.local` 里的 `TUSHARE_TOKEN`（防止本地跑旧 key）
+3. 同步更新本地 `.env.local` 里的 `TUSHARE_TOKEN`（防止本地跑旧 key）
 
 也可以用命令行（需已登录 gh）：
 
