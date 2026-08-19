@@ -9,3 +9,6 @@ numba>=0.57.0
 fastapi>=0.111.0
 uvicorn[standard]>=0.30.0
 httpx>=0.27.0
+
+# 桌面版控制台（pywebview 内嵌前端）
+pywebview>=5.0

@@ -1,0 +1,6 @@
+﻿phase,label,strategy_id,signal_count,win_rate_pct,average_return_pct,profit_factor,signal_day_count,error
+validation,baseline-b1,b1,573,44.5026,0.5421,1.1341,277,
+validation,baseline-volume_new_high,volume_new_high,952,44.7084,0.2949,1.0453,277,
+validation,baseline-high_52w_momentum,high_52w_momentum,8258,48.5596,1.4092,1.2437,277,
+validation,resonance-no-regime,resonance,3765,48.0914,1.0772,1.1649,277,
+validation,resonance-full,resonance,3765,48.0914,1.0772,1.1649,277,

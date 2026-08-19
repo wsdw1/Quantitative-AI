@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import re
 from datetime import datetime, timedelta
@@ -218,6 +219,47 @@ def _number(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _candidate_run_signature(candidate_run: dict[str, Any]) -> str:
+    """候选股运行结果的稳定摘要，用于判断 AI 评分是否仍对应同一批候选。
+
+    仅提取影响评分有效性的字段（选股日、策略、候选的代码/日期/收盘/评分），
+    任一字段变化都会改变签名。上游 38c5528 的测试引用了该函数但未随代码提交，
+    此处为本地补全的兼容实现。
+    """
+    run = {
+        "pick_date": candidate_run.get("pick_date"),
+        "strategy": (candidate_run.get("meta") or {}).get("strategy"),
+        "candidates": [
+            {
+                "code": item.get("code"),
+                "date": item.get("date"),
+                "strategy": item.get("strategy"),
+                "close": item.get("close"),
+                "score": item.get("score"),
+            }
+            for item in candidate_run.get("candidates") or []
+        ],
+    }
+    canonical = json.dumps(run, ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _candidate_scores_match_run(
+    payload: dict[str, Any],
+    candidate_run: dict[str, Any],
+    strategy_id: str | None,
+) -> bool:
+    """校验评分批次与候选运行是否匹配（策略、选股日、候选签名一致）。"""
+    stored_signature = payload.get("candidate_signature")
+    if not stored_signature:
+        return False
+    if strategy_id and payload.get("strategy_id") != strategy_id:
+        return False
+    if payload.get("pick_date") != candidate_run.get("pick_date"):
+        return False
+    return stored_signature == _candidate_run_signature(candidate_run)
 
 
 def _bounded(value: Any, low: float = 0.0, high: float = 100.0) -> float:

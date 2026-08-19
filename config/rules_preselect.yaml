@@ -50,7 +50,10 @@ strategies:
     max_candidates: 30
   resonance:
     enabled: true
-    sub_strategies: [b1, volume_new_high, high_52w_momentum]
+    sub_strategies:
+    - b1
+    - volume_new_high
+    - high_52w_momentum
     min_hits: 2
     max_candidates: 30
     risk_high_threshold: 85

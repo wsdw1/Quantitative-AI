@@ -1,0 +1,7 @@
+# 线上定时任务（GitHub Actions）用到的精简依赖，不含前端 / 桌面版。
+tushare>=1.4.25
+pandas>=1.5.0
+numpy>=1.23.0
+PyYAML>=6.0
+tqdm>=4.64.0
+numba>=0.59.0

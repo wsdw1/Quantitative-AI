@@ -13,6 +13,7 @@ run_all.py
     python run_all.py --start-from 2         # 从第 2 步开始
     python run_all.py --no-dashboard         # 选股后不提示控制台启动方式
     python run_all.py --pick-date 2026-04-22 # 指定选股日期
+    python run_all.py --send-email           # 完成后把选股结果发送到邮箱（需在 .env.local 配置 SMTP）
 """
 from __future__ import annotations
 
@@ -136,7 +137,15 @@ def main() -> None:
     parser.add_argument(
         "--strategy-id",
         default=None,
-        help="策略 ID：b1 或 volume_new_high；默认读取配置 active_strategy",
+        help="策略 ID：b1、volume_new_high 或 high_52w_momentum；默认读取配置 active_strategy",
+    )
+    parser.add_argument(
+        "--send-email", action="store_true",
+        help="流程执行成功后把选股结果发送到邮箱（读取 .env.local 的 SMTP 配置）",
+    )
+    parser.add_argument(
+        "--mail-to", default=None,
+        help="邮件收件人，配合 --send-email 使用（默认取 .env.local 的 MAIL_TO）",
     )
     args = parser.parse_args()
 
@@ -160,6 +169,15 @@ def main() -> None:
 
     if start <= 2:
         _print_summary()
+
+    if args.send_email and start <= 2:
+        from notify.mailer import send_candidates_report  # noqa: PLC0415
+        try:
+            to = send_candidates_report(to=args.mail_to)
+            print(f"[INFO] 选股结果已发送到邮箱：{to}")
+        except Exception as exc:
+            logger.exception("发送选股结果邮件失败")
+            print(f"[ERROR] 发送选股结果邮件失败：{exc}")
 
     if start <= 3 and not args.no_dashboard:
         print(f"\n{'=' * 60}")
