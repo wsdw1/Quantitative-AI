@@ -1,0 +1,47 @@
+name: daily-strategy-report
+
+on:
+  schedule:
+    # 周一至周五 16:30 北京时间（UTC+8），等当日行情收盘入库后再跑
+    - cron: "30 8 * * 1-5"
+  workflow_dispatch: {}
+
+concurrency:
+  group: daily-strategy-report
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+  SMTP_HOST: smtp.qq.com
+  SMTP_PORT: "465"
+  SMTP_USER: ${{ secrets.SMTP_USER }}
+  SMTP_AUTH_CODE: ${{ secrets.SMTP_AUTH_CODE }}
+  MAIL_TO: ${{ secrets.MAIL_TO }}
+
+jobs:
+  daily:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # 缓存 SQLite 行情库：首次全量重建，之后每天只增量补新交易日
+      - name: Restore quant data cache
+        uses: actions/cache@v4
+        with:
+          path: data/oversell.db
+          key: quant-oversell-db-${{ github.run_id }}
+          restore-keys: |
+            quant-oversell-db-
+
+      - name: Install dependencies
+        run: pip install -r requirements-run.txt
+
+      - name: Run daily strategy and send report
+        run: python scripts/daily_report.py
