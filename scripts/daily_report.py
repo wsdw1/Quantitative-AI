@@ -130,6 +130,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     logger.info("开始每日选股任务（data_mode=%s）", args.data_mode)
+    # 指数数据必须先于选股就绪：共振策略要用指数位置判断风险/底部状态，
+    # 缺了它会把市场当作"中性区"，导致本地与线上结果不一致。
+    try:
+        _ensure_index_data()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("指数数据准备失败")
+        _send_error_email(
+            f"【quant】每日任务失败 {today}",
+            f"指数数据准备失败：\n{exc}",
+        )
+        return 1
+
     try:
         result = run_pipeline(data_mode=args.data_mode, no_dashboard=True)
     except Exception as exc:  # noqa: BLE001
@@ -143,12 +155,11 @@ def main(argv: list[str] | None = None) -> int:
     pick_date = result.pick_date if result else None
     try:
         _run_other_strategies(pick_date)
-        _ensure_index_data()
     except Exception as exc:  # noqa: BLE001
         logger.exception("附加策略或指数数据准备失败")
         _send_error_email(
             f"【quant】每日任务失败 {today}",
-            f"附加策略/指数数据准备失败：\n{exc}",
+            f"附加策略准备失败：\n{exc}",
         )
         return 1
 
