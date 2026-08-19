@@ -4,9 +4,9 @@
 窗口关闭后自动停止本次启动的后端；若 8000 端口已有兼容后端则直接复用。
 
 用法：
-    python desktop_app.py                 # 打开桌面窗口
-    python desktop_app.py --no-gui        # 只启动后端并自检后退出
-    python desktop_app.py --rebuild-frontend
+    python scripts/desktop_app.py                 # 打开桌面窗口
+    python scripts/desktop_app.py --no-gui        # 只启动后端并自检后退出
+    python scripts/desktop_app.py --rebuild-frontend
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from urllib.request import urlopen
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
 WEB_DIST = WEB_DIR / "dist"
 LOG_DIR = ROOT / "logs"

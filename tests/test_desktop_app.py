@@ -7,7 +7,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
-import desktop_app
+from scripts import desktop_app
 
 
 class _Handler(BaseHTTPRequestHandler):

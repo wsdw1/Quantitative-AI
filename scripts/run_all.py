@@ -8,12 +8,12 @@ run_all.py
 步骤 3  web + backend            — 新版 Vue 控制台
 
 用法：
-    python run_all.py                        # 完整流程（增量更新数据 + 选股 + 提示控制台启动方式）
-    python run_all.py --skip-fetch           # 跳过数据下载
-    python run_all.py --start-from 2         # 从第 2 步开始
-    python run_all.py --no-dashboard         # 选股后不提示控制台启动方式
-    python run_all.py --pick-date 2026-04-22 # 指定选股日期
-    python run_all.py --send-email           # 完成后把选股结果发送到邮箱（需在 .env.local 配置 SMTP）
+    python scripts/run_all.py                        # 完整流程（增量更新数据 + 选股 + 提示控制台启动方式）
+    python scripts/run_all.py --skip-fetch           # 跳过数据下载
+    python scripts/run_all.py --start-from 2         # 从第 2 步开始
+    python scripts/run_all.py --no-dashboard         # 选股后不提示控制台启动方式
+    python scripts/run_all.py --pick-date 2026-04-22 # 指定选股日期
+    python scripts/run_all.py --send-email           # 完成后把选股结果发送到邮箱（需在 .env.local 配置 SMTP）
 """
 from __future__ import annotations
 
@@ -22,9 +22,10 @@ import logging
 import sys
 from pathlib import Path
 
-from pipeline.runtime import run_pipeline
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
 
-ROOT   = Path(__file__).resolve().parent
+from pipeline.runtime import run_pipeline  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,

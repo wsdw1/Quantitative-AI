@@ -21,7 +21,7 @@ from urllib.error import URLError
 from urllib.request import urlopen
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = ROOT / "web"
 WEB_DIST = WEB_DIR / "dist"
 LOG_DIR = ROOT / "logs"
