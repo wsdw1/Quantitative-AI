@@ -138,7 +138,7 @@ python run_all.py --data-mode existing --no-dashboard --send-email
 
 ```text
 TUSHARE_TOKEN  你的 Tushare token
-SMTP_USER      your-email@example.com
+SMTP_USER      你的QQ邮箱地址
 SMTP_AUTH_CODE QQ 邮箱 SMTP 授权码
 MAIL_TO        收件人邮箱
 ```
