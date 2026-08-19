@@ -150,6 +150,57 @@ MAIL_TO        收件人邮箱
 python scripts/daily_report.py --data-mode existing
 ```
 
+## 运维：修改线上配置
+
+### 线上永远执行最新版本
+
+工作流每次运行都会从默认分支 `main` 的最新提交拉取代码，缓存里只保存行情数据、不保存代码。
+所以任何代码改动只需 `git push` 到 main，下一次定时任务或手动触发就会使用新版本，无需其他操作。
+
+### 更换 TUSHARE token
+
+1. 打开仓库 https://github.com/wsdw1/work/settings/secrets/actions
+2. 找到 `TUSHARE_TOKEN` → **Update** → 粘贴新 token 保存
+3. 同步更新本地 `quant/.env.local` 里的 `TUSHARE_TOKEN`（防止本地跑旧 key）
+
+也可以用命令行（需已登录 gh）：
+
+```bash
+gh secret set TUSHARE_TOKEN --repo wsdw1/work --body "新的token"
+```
+
+### 修改邮件接收地址
+
+只改收件人：更新 Secret `MAIL_TO` 为新的邮箱地址即可（发送账号不变）。
+
+要换发送账号（换一个 QQ 邮箱发信）：同时更新三个 Secret：
+
+| Secret | 值 |
+|---|---|
+| `SMTP_USER` | 新邮箱地址 |
+| `SMTP_AUTH_CODE` | 新邮箱的 SMTP 授权码 |
+| `MAIL_TO` | 收件地址（可不变） |
+
+同样在 Secrets 页面 **Update**，或：
+
+```bash
+gh secret set MAIL_TO --repo wsdw1/work --body "新收件地址"
+```
+
+### 修改自动触发时间
+
+定时配置在仓库根目录 `.github/workflows/daily-strategy-report.yml` 的 `cron` 字段：
+
+```yaml
+schedule:
+  - cron: "30 8 * * 1-5"   # 周一至周五 08:30 UTC = 北京时间 16:30
+```
+
+`cron` 使用 **UTC 时间**（北京时间减 8 小时）。想改成北京时间 17:30 就写 `30 9 * * 1-5`；
+想周末也跑就把 `1-5` 改成 `*`。改完提交并推送即可，下次运行自动生效。
+
+手动触发不受 cron 限制，随时可在 Actions 页面点 **Run workflow**。
+
 ## 网页控制台
 
 一键开发启动：
