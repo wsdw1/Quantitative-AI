@@ -50,8 +50,10 @@ def _config(strategy_id: str, with_regime: bool, fast: bool) -> dict:
         "risk_high_threshold": 85,
         "bottom_low_threshold": 15,
         "reversal_volume_ratio": 1.2,
-        "high_position_action": "downweight",
+        "high_position_action": "exclude",
         "downweight_factor": 0.5,
+        "risk_max_candidates": 15,
+        "trend_dominant_in_risk": True,
         "bottom_fishing_enabled": with_regime,
         "bottom_stock_pos_cap": 30,
     }

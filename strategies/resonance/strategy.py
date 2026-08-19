@@ -21,8 +21,10 @@ DEFAULT_CONFIG = {
     "risk_high_threshold": 85.0,
     "bottom_low_threshold": 15.0,
     "reversal_volume_ratio": 1.2,
-    "high_position_action": "downweight",
+    "high_position_action": "exclude",
     "downweight_factor": 0.5,
+    "risk_max_candidates": 15,
+    "trend_dominant_in_risk": True,
     "bottom_fishing_enabled": True,
     "bottom_stock_pos_cap": 30.0,
 }
@@ -32,7 +34,7 @@ class ResonanceStrategy:
     meta = StrategyMeta(
         id="resonance",
         name="多策略共振",
-        description="并行运行子策略并按命中次数共振合并，叠加市场/板块/行业位置风控（高位降权、低位反转抄底）。",
+        description="并行运行子策略并按命中次数共振合并，叠加市场/板块/行业位置风控（风险区剔除高位并收紧候选、顺势主导；低位反转抄底）。",
         default_config=DEFAULT_CONFIG,
     )
 
@@ -125,12 +127,12 @@ class ResonanceStrategy:
         cfg = self._cfg(cfg)
         if not cfg.get("enabled", True):
             return []
-        sub_results: list[list[Candidate]] = []
+        sub_results: list[tuple[str, list[Candidate]]] = []
         for sub_id, strategy in self._sub_strategies(cfg):
             prepared = self._prepared_by_sub.get(sub_id) or data
-            sub_results.append(strategy.select_prepared(prepared, self._sub_cfg(cfg, sub_id), context))
-        candidates = self._merge(sub_results, cfg)
-        return self._apply_regime(candidates, cfg, context, data)
+            sub_results.append((sub_id, strategy.select_prepared(prepared, self._sub_cfg(cfg, sub_id), context)))
+        candidates = self._merge([items for _, items in sub_results], cfg)
+        return self._apply_regime(candidates, cfg, context, data, sub_results)
 
     def _merge(self, sub_results: list[list[Candidate]], cfg: dict) -> list[Candidate]:
         merged: dict[str, dict] = {}
@@ -163,6 +165,7 @@ class ResonanceStrategy:
         cfg: dict,
         context: StrategyContext,
         data: dict[str, pd.DataFrame],
+        sub_results: list[tuple[str, list[Candidate]]] | None = None,
     ) -> list[Candidate]:
         from market_analysis.positions import market_regime
 
@@ -174,6 +177,13 @@ class ResonanceStrategy:
             reversal_volume_ratio=float(cfg["reversal_volume_ratio"]),
         )
         regime = regime_payload.get("regime", "neutral")
+        if regime == "risk" and cfg.get("trend_dominant_in_risk", True) and sub_results:
+            momentum_candidates = next(
+                (items for sub_id, items in sub_results if sub_id == "high_52w_momentum"),
+                [],
+            )
+            if momentum_candidates:
+                candidates = self._trend_merge(candidates, momentum_candidates, cfg)
         positions: dict[str, float | None] = {}
         for code in {item.code for item in candidates}:
             frame = data.get(code)
@@ -201,12 +211,54 @@ class ResonanceStrategy:
                 if cfg["high_position_action"] != "exclude":
                     item.score = float(item.score) * float(cfg["downweight_factor"])
         if regime == "risk" and cfg["high_position_action"] == "exclude":
-            candidates = [item for item in candidates if not item.extra.get("risk_marked")]
+            candidates = [
+                item for item in candidates
+                if not (item.extra.get("risk_marked") and not item.extra.get("trend_leader"))
+            ]
         if regime == "bottom" and cfg.get("bottom_fishing_enabled", True):
             candidates.extend(self._bottom_pool(data, cfg, context))
         candidates.sort(key=lambda item: item.score, reverse=True)
-        max_candidates = int(cfg.get("max_candidates", 0))
+        if regime == "risk":
+            max_candidates = int(cfg.get("risk_max_candidates", cfg.get("max_candidates", 0)))
+        else:
+            max_candidates = int(cfg.get("max_candidates", 0))
         return candidates[:max_candidates] if max_candidates else candidates
+
+    def _trend_merge(
+        self,
+        resonance_candidates: list[Candidate],
+        momentum_candidates: list[Candidate],
+        cfg: dict,
+    ) -> list[Candidate]:
+        """Risk-regime trend-dominant pool: momentum leaders primary, resonance multi-hit as bonus."""
+        by_code = {item.code: item for item in resonance_candidates}
+        ranks = pd.Series([float(item.score) for item in momentum_candidates]).rank(pct=True, method="average")
+        merged: list[Candidate] = []
+        for item, rank in zip(momentum_candidates, ranks):
+            existing = by_code.pop(item.code, None)
+            if existing is not None:
+                hits = dict(existing.extra.get("hits", {}))
+                hits["high_52w_momentum"] = float(item.score)
+                existing.extra["hits"] = hits
+                existing.extra["hit_count"] = len(hits)
+                existing.extra["momentum_rank"] = float(rank)
+                existing.extra["trend_leader"] = True
+                existing.extra["combined_score"] = round(float(existing.extra.get("combined_score", 0.0)) + float(rank), 4)
+                existing.score = round(float(existing.extra["combined_score"]), 4)
+                merged.append(existing)
+                continue
+            item.strategy = self.meta.id
+            item.extra["hit_count"] = 1
+            item.extra["hits"] = {"high_52w_momentum": float(item.score)}
+            item.extra["combined_score"] = round(float(rank), 4)
+            item.extra["momentum_rank"] = float(rank)
+            item.extra["trend_leader"] = True
+            item.score = round(float(rank), 4)
+            merged.append(item)
+        for item in by_code.values():
+            item.extra.setdefault("momentum_rank", 0.0)
+            merged.append(item)
+        return merged
 
     def _bottom_pool(
         self,

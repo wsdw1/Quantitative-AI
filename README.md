@@ -94,6 +94,61 @@ python run_all.py --data-mode refresh --no-dashboard
 python run_all.py --data-mode cache-only --no-dashboard
 ```
 
+## 邮件通知
+
+在项目根目录 `.env.local` 中配置 QQ 邮箱 SMTP 授权码（已加入 `.gitignore`，不会提交）：
+
+```env
+SMTP_HOST=smtp.qq.com
+SMTP_PORT=465
+SMTP_USER=你的QQ邮箱
+SMTP_AUTH_CODE=你的SMTP授权码
+MAIL_TO=收件人邮箱
+```
+
+发送一封测试邮件：
+
+```bash
+python -m notify.mailer test
+```
+
+发送最新选股结果 / 共振策略回测汇总：
+
+```bash
+python -m notify.mailer candidates
+python -m notify.mailer verification
+```
+
+跑完整个选股流程后自动发送结果：
+
+```bash
+python run_all.py --data-mode existing --no-dashboard --send-email
+```
+
+## 每日线上自动执行（GitHub Actions）
+
+仓库根目录的 `.github/workflows/daily-strategy-report.yml` 实现了每日自动执行：
+
+- 周一至周五北京时间 16:30 自动触发（可手动 `workflow_dispatch` 触发）
+- 自动判断是否交易日，非交易日不发邮件
+- 首次运行全量重建行情库，之后通过 Actions 缓存每天只增量补数据
+- 选股完成后把候选结果发送到邮箱；失败会自动发一封错误通知邮件
+
+线上所需密钥以 GitHub Secrets 形式配置（仓库 Settings → Secrets and variables → Actions）：
+
+```text
+TUSHARE_TOKEN  你的 Tushare token
+SMTP_USER      your-email@example.com
+SMTP_AUTH_CODE QQ 邮箱 SMTP 授权码
+MAIL_TO        收件人邮箱
+```
+
+本地调试每日流程：
+
+```bash
+python scripts/daily_report.py --data-mode existing
+```
+
 ## 网页控制台
 
 一键开发启动：
@@ -291,7 +346,7 @@ scripts\test_browser.bat
 ## resonance 多策略共振（2026-08-19 新增）
 
 - 元策略并行运行子策略（默认 b1、volume_new_high、high_52w_momentum），按命中次数共振合并（`min_hits=2`），并叠加市场/板块/行业位置风控。
-- 位置定义：收盘价在近 252 交易日的分位；风险区 ≥85 提示风险（高位个股标记并降权 0.5 倍）；抄底区 ≤15 且当日反转确认（收涨 + 量比 ≥1.2）时启用超跌抄底池。
+- 位置定义：收盘价在近 252 交易日的分位；风险区 ≥85 时剔除非动量高位候选、保留动量领先股并标记"高位风险"，候选收紧到 `risk_max_candidates=15`，强趋势市以 52 周动量为主导；抄底区 ≤15 且当日反转确认（收涨 + 量比 ≥1.2）时启用超跌抄底池。
 - 运行命令：
 
 ```bash

@@ -47,8 +47,10 @@ class ResonanceSkeletonTests(unittest.TestCase):
         self.assertEqual(cfg["risk_high_threshold"], 85.0)
         self.assertEqual(cfg["bottom_low_threshold"], 15.0)
         self.assertEqual(cfg["reversal_volume_ratio"], 1.2)
-        self.assertEqual(cfg["high_position_action"], "downweight")
+        self.assertEqual(cfg["high_position_action"], "exclude")
         self.assertEqual(cfg["downweight_factor"], 0.5)
+        self.assertEqual(cfg["risk_max_candidates"], 15)
+        self.assertEqual(cfg["trend_dominant_in_risk"], True)
         self.assertEqual(cfg["bottom_stock_pos_cap"], 30.0)
 
     def test_warmup_covers_longest_sub_strategy_and_252(self) -> None:
@@ -111,13 +113,109 @@ class ResonanceMergeTests(unittest.TestCase):
             "market": [{"code": "000001.SH", "position": 90.0}],
             "boards": {},
         }
+        cfg = strategy._cfg({"high_position_action": "downweight"})
         with patch("market_analysis.positions.market_regime", return_value=fake_regime), \
              patch("market_analysis.positions.stock_positions", return_value={}):
-            result = strategy._apply_regime(candidates, strategy._cfg({}), self._context(), data)
+            result = strategy._apply_regime(candidates, cfg, self._context(), data)
         by_code = {item.code: item for item in result}
         self.assertEqual(by_code["000001"].extra["regime"], "risk")
         self.assertEqual(by_code["000001"].score, 0.5)
         self.assertEqual(by_code["000002"].score, 1.0)
+
+    def test_risk_regime_excludes_high_position_stocks_by_default(self) -> None:
+        strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
+        candidates = [_candidate("000001", 1.0), _candidate("000002", 1.0)]
+        dates = pd.bdate_range("2026-07-20", periods=300)
+        data = {
+            "000001": pd.DataFrame({"close": np.linspace(10, 20, 300), "pos252": 90.0}, index=dates),
+            "000002": pd.DataFrame({"close": np.linspace(10, 20, 300), "pos252": 20.0}, index=dates),
+        }
+        fake_regime = {
+            "regime": "risk", "available": True,
+            "market": [{"code": "000001.SH", "position": 90.0}],
+            "boards": {},
+        }
+        with patch("market_analysis.positions.market_regime", return_value=fake_regime):
+            result = strategy._apply_regime(candidates, strategy._cfg({}), self._context(), data)
+        self.assertEqual([item.code for item in result], ["000002"])
+        self.assertNotIn("risk_marked", result[0].extra)
+
+    def test_risk_regime_caps_candidates_to_risk_max(self) -> None:
+        strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
+        candidates = [_candidate(f"00000{i}", float(i)) for i in range(1, 4)]
+        dates = pd.bdate_range("2026-07-20", periods=300)
+        data = {
+            code: pd.DataFrame({"close": np.linspace(10, 20, 300), "pos252": 10.0}, index=dates)
+            for code in [item.code for item in candidates]
+        }
+        fake_regime = {"regime": "risk", "available": True, "market": [{"code": "000001.SH", "position": 90.0}], "boards": {}}
+        cfg = strategy._cfg({"risk_max_candidates": 2, "trend_dominant_in_risk": False})
+        with patch("market_analysis.positions.market_regime", return_value=fake_regime):
+            result = strategy._apply_regime(candidates, cfg, self._context(), data)
+        self.assertEqual(len(result), 2)
+
+    def test_trend_dominant_merge_in_risk_regime(self) -> None:
+        strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
+        resonance_candidates = [_candidate("000002", 1.8)]
+        momentum_candidates = [
+            _candidate("000003", 99.0, strategy="high_52w_momentum"),
+            _candidate("000001", 90.0, strategy="high_52w_momentum"),
+        ]
+        merged = strategy._trend_merge(resonance_candidates, momentum_candidates, strategy._cfg({}))
+        by_code = {item.code: item for item in merged}
+        self.assertIn("000003", by_code)
+        self.assertIn("000001", by_code)
+        self.assertIn("000002", by_code)
+        self.assertEqual(by_code["000003"].extra["hit_count"], 1)
+        self.assertEqual(by_code["000003"].extra["hits"]["high_52w_momentum"], 99.0)
+        self.assertGreater(by_code["000003"].score, by_code["000001"].score)
+        self.assertEqual(by_code["000002"].strategy, "resonance")
+
+    def test_apply_regime_uses_trend_dominant_merge_with_sub_results(self) -> None:
+        strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
+        resonance_candidates = [_candidate("000002", 1.8)]
+        momentum_candidates = [
+            _candidate("000003", 99.0, strategy="high_52w_momentum"),
+            _candidate("000001", 90.0, strategy="high_52w_momentum"),
+        ]
+        dates = pd.bdate_range("2026-07-20", periods=300)
+        data = {
+            code: pd.DataFrame({"close": np.linspace(10, 20, 300), "pos252": 20.0}, index=dates)
+            for code in ("000001", "000002", "000003")
+        }
+        fake_regime = {"regime": "risk", "available": True, "market": [{"code": "000001.SH", "position": 90.0}], "boards": {}}
+        sub_results = [("high_52w_momentum", momentum_candidates)]
+        with patch("market_analysis.positions.market_regime", return_value=fake_regime):
+            result = strategy._apply_regime(resonance_candidates, strategy._cfg({}), self._context(), data, sub_results)
+        codes = {item.code for item in result}
+        self.assertIn("000003", codes)
+        self.assertIn("000001", codes)
+        self.assertIn("000002", codes)
+
+    def test_trend_mode_keeps_momentum_leaders_but_excludes_resonance_only_high(self) -> None:
+        strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
+        resonance_candidates = [_candidate("000002", 1.8)]
+        momentum_candidates = [
+            _candidate("000003", 99.0, strategy="high_52w_momentum"),
+            _candidate("000001", 90.0, strategy="high_52w_momentum"),
+        ]
+        dates = pd.bdate_range("2026-07-20", periods=300)
+        data = {
+            "000001": pd.DataFrame({"close": np.linspace(10, 20, 300), "pos252": 92.0}, index=dates),
+            "000002": pd.DataFrame({"close": np.linspace(10, 20, 300), "pos252": 90.0}, index=dates),
+            "000003": pd.DataFrame({"close": np.linspace(10, 20, 300), "pos252": 95.0}, index=dates),
+        }
+        fake_regime = {"regime": "risk", "available": True, "market": [{"code": "000001.SH", "position": 90.0}], "boards": {}}
+        sub_results = [("high_52w_momentum", momentum_candidates)]
+        with patch("market_analysis.positions.market_regime", return_value=fake_regime):
+            result = strategy._apply_regime(resonance_candidates, strategy._cfg({}), self._context(), data, sub_results)
+        codes = {item.code for item in result}
+        self.assertIn("000003", codes)
+        self.assertIn("000001", codes)
+        self.assertNotIn("000002", codes)
+        by_code = {item.code: item for item in result}
+        self.assertTrue(by_code["000003"].extra["trend_leader"])
+        self.assertTrue(by_code["000003"].extra["risk_marked"])
 
     def test_bottom_regime_adds_pool_candidates(self) -> None:
         strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))

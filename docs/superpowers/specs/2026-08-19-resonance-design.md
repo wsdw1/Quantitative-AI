@@ -260,5 +260,6 @@ strategies:
 | 决策点 | 结论 |
 | --- | --- |
 | 子策略集合 | 先用现有 3 个（b1、volume_new_high、high_52w_momentum）；价格动量多因子留作第二步 |
-| 高位个股处理 | 标记 + 降权（0.5 倍），不剔除（保留剔除开关） |
+| 高位个股处理 | 首版为标记 + 降权；2026-08-19 迭代改为：风险区剔除非动量高位候选、保留动量领先股并标记风险，候选收紧到 15（`high_position_action=exclude` + `risk_max_candidates=15`） |
 | 阈值口径 | 高位 ≥85；低位 ≤15；反转 = 收涨 + 量比 ≥1.2 |
+| 强趋势市处理 | 新增 `trend_dominant_in_risk=true`：风险区以 high_52w_momentum 候选为主排序，共振多命中做加成 |
