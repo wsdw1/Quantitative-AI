@@ -1,4 +1,4 @@
-active_strategy: resonance
+active_strategy: high_52w_momentum
 global:
   data_dir: data/raw
   stock_list_file: data/stocklist.csv
@@ -8,6 +8,9 @@ global:
   n_turnover_days: 43
   markets:
   - main
+  - gem
+  - star
+  - bse
 strategies:
   b1:
     enabled: true

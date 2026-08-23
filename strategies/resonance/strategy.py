@@ -96,6 +96,13 @@ class ResonanceStrategy:
         context: StrategyContext | None = None,
     ) -> dict[str, pd.DataFrame]:
         cfg = self._cfg(cfg)
+        # Live runs only need the liquidity pool for decisioning, but the pool is
+        # built before preparation. Trim inputs so the three sub-strategies do not
+        # compute indicators for thousands of out-of-pool symbols. Backtests call
+        # this with a bare prepare context (no pool) and rank per-day, so they are
+        # unaffected.
+        if context is not None and context.pool is not None:
+            data = {code: frame for code, frame in data.items() if code in context.pool}
         merged: dict[str, pd.DataFrame] = {}
         self._prepared_by_sub = {}
         for sub_id, strategy in self._sub_strategies(cfg):

@@ -168,6 +168,7 @@ def run(
             "selected": len(candidates),
             "strategy": active_strategy,
             "strategy_name": strategy.meta.name,
+            "adjust": adjust,
             "provider": "local_csv",
             "config": {
                 "global": {

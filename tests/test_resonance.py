@@ -68,6 +68,25 @@ class ResonanceSkeletonTests(unittest.TestCase):
         self.assertIn("kdj_col", merged["000001"].columns)
         self.assertIn("mom_col", merged["000001"].columns)
 
+    def test_prepare_all_uses_pool_to_skip_out_of_pool_symbols(self) -> None:
+        strategy = ResonanceStrategy(registry=lambda sid: _FakeSubStrategy(sid))
+        closes = list(range(1, 301))
+        frame = pd.DataFrame(
+            {"close": closes, "volume": [1000.0] * 300, "amount": [10000.0] * 300},
+            index=pd.bdate_range("2025-01-01", periods=300),
+        )
+        frames = {"000001": frame, "000002": frame.copy()}
+        context = StrategyContext(
+            pick_date=pd.Timestamp("2025-12-31"),
+            names={},
+            pool={"000001"},
+            progress_enabled=False,
+        )
+        merged = strategy.prepare_all(frames, strategy._cfg({}), context)
+        self.assertEqual(set(merged), {"000001"})
+        self.assertIn("kdj_col", merged["000001"].columns)
+        self.assertIn("pos252", merged["000001"].columns)
+
 
 def _candidate(code: str, score: float, strategy: str = "resonance") -> Candidate:
     return Candidate(

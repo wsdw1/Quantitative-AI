@@ -10,6 +10,7 @@ from tqdm import tqdm
 
 from pipeline.cancellation import RunCancelledError
 from pipeline.schemas import Candidate
+from strategies._utils import extract_cross_section, safe_float as _safe_float
 from strategies.base import StrategyContext, StrategyMeta
 
 logger = logging.getLogger(__name__)
@@ -28,16 +29,6 @@ DEFAULT_CONFIG = {
     "momentum_weight": 0.40,
     "max_candidates": 30,
 }
-
-
-def _safe_float(value: object, default: float = 0.0) -> float:
-    try:
-        if isinstance(value, pd.Series):
-            value = value.iloc[-1]
-        result = float(value)
-        return default if not np.isfinite(result) else result
-    except (TypeError, ValueError, IndexError):
-        return default
 
 
 class High52WeekMomentumStrategy:
@@ -130,27 +121,16 @@ class High52WeekMomentumStrategy:
         pool: set[str] | None,
     ) -> None:
         # rank 是选股日的全市场截面排名，不能在单只股票的时间序列内部计算。
-        proximity: dict[str, float] = {}
-        momentum: dict[str, float] = {}
-        for code, frame in data.items():
-            if pool is not None and code not in pool:
-                continue
-            if pick_date not in frame.index:
-                continue
-            row = frame.loc[pick_date]
-            if isinstance(row, pd.DataFrame):
-                row = row.iloc[-1]
-            proximity_value = _safe_float(row.get("high_proximity"), np.nan)
-            momentum_value = _safe_float(row.get("momentum_return"), np.nan)
-            if np.isfinite(proximity_value) and np.isfinite(momentum_value):
-                proximity[code] = proximity_value
-                momentum[code] = momentum_value
-
-        if not proximity:
+        proximity = extract_cross_section(data, pick_date, "high_proximity", pool=pool)
+        momentum = extract_cross_section(data, pick_date, "momentum_return", pool=pool)
+        common = set(proximity) & set(momentum)
+        if not common:
             return
+        proximity = {code: proximity[code] for code in common}
+        momentum = {code: momentum[code] for code in common}
         proximity_ranks = pd.Series(proximity).rank(pct=True, method="average")
         momentum_ranks = pd.Series(momentum).rank(pct=True, method="average")
-        for code in proximity:
+        for code in common:
             data[code].loc[pick_date, "high_proximity_rank"] = float(proximity_ranks[code])
             data[code].loc[pick_date, "momentum_rank"] = float(momentum_ranks[code])
 

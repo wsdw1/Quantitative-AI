@@ -33,6 +33,7 @@ CONFIG_FILE = ROOT / "config" / "ai_scoring.yaml"
 LATEST_CANDIDATES = ROOT / "data" / "candidates" / "candidates_latest.json"
 METHODOLOGY_VERSION = "benben-super-boom-v1"
 POSITIVE_DIMENSIONS = ("行业景气度", "业务纯度", "估值水位", "细分行业龙头", "市场辨识度")
+_ADJUST_MODES = {"qfq", "hfq", "bfq"}
 
 
 def _read_yaml(path: Path = CONFIG_FILE) -> dict[str, Any]:
@@ -219,6 +220,21 @@ def _number(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _resolve_candidate_adjust(candidate_run: dict[str, Any]) -> str:
+    """Resolve the adjusted-price mode for a candidate run.
+
+    Prefers the new top-level ``meta.adjust`` and falls back to the legacy nested
+    ``meta.config.global.adjust`` so older JSON/DB runs keep scoring correctly.
+    """
+    meta = candidate_run.get("meta") or {}
+    value = meta.get("adjust")
+    if not value:
+        global_cfg = (meta.get("config") or {}).get("global") or {}
+        value = global_cfg.get("adjust")
+    resolved = str(value or "qfq").strip().lower()
+    return resolved if resolved in _ADJUST_MODES else "qfq"
 
 
 def _candidate_run_signature(candidate_run: dict[str, Any]) -> str:
@@ -492,7 +508,7 @@ def score_latest_candidates(
     sector_context.pop("sources", None)
     stock_rows = _load_stocklist_rows({str(item.get("code", "")).zfill(6) for item in candidates})
     methodology = build_methodology_context()
-    adjust = str(candidate_run.get("meta", {}).get("adjust") or "qfq")
+    adjust = _resolve_candidate_adjust(candidate_run)
     if progress_callback:
         progress_callback("读取候选股三年价格位置和全市场流动性")
     market_facts = _candidate_market_facts(candidates, adjust)

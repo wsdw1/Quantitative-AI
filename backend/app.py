@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 import json
 import logging
+import re
 import threading
 import time
 import uuid
@@ -68,7 +70,16 @@ API_VERSION = "0.2.0"
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="oversell console API", version="0.1.0")
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    init_db()
+    mark_interrupted_runs()
+    threading.Thread(target=_knowledge_refresh_loop, daemon=True, name="knowledge-refresh").start()
+    yield
+
+
+app = FastAPI(title="oversell console API", version="0.1.0", lifespan=_lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
@@ -78,6 +89,23 @@ app.add_middleware(
 )
 
 DataMode = Literal["existing", "incremental", "refresh", "cache-only"]
+ADJUST_MODES = {"qfq", "hfq", "bfq"}
+
+
+def _validate_stock_code(code: str) -> str:
+    """Normalize and require a six-digit A-share code to block path traversal."""
+    safe = str(code)
+    if not re.fullmatch(r"\d{6}", safe):
+        raise HTTPException(status_code=400, detail="股票代码必须是 6 位数字")
+    return safe
+
+
+def _validate_adjust(adjust: str) -> str:
+    """Whitelist the adjusted-price mode used in file/DB lookups."""
+    value = str(adjust).strip().lower()
+    if value not in ADJUST_MODES:
+        raise HTTPException(status_code=400, detail="adjust 必须是 qfq / hfq / bfq 之一")
+    return value
 
 
 class ConfigPayload(BaseModel):
@@ -184,13 +212,6 @@ _backtest_runs: dict[str, BacktestStatus] = {}
 _backtest_cancel_events: dict[str, threading.Event] = {}
 _backtest_threads: dict[str, threading.Thread] = {}
 _backtests_lock = threading.Lock()
-
-
-@app.on_event("startup")
-def initialize_local_store() -> None:
-    init_db()
-    mark_interrupted_runs()
-    threading.Thread(target=_knowledge_refresh_loop, daemon=True, name="knowledge-refresh").start()
 
 
 def _knowledge_refresh_loop() -> None:
@@ -860,7 +881,8 @@ def get_stocks() -> dict[str, Any]:
 
 @app.get("/api/stocks/{code}/kline")
 def get_stock_kline(code: str, adjust: str = "qfq", limit: int = 180) -> dict[str, Any]:
-    safe_code = str(code).zfill(6)
+    safe_code = _validate_stock_code(code)
+    adjust = _validate_adjust(adjust)
     database_data = load_daily_prices(adjust, 1, [safe_code])
     if database_data.get(safe_code) is not None:
         df = database_data[safe_code].copy()
@@ -908,7 +930,8 @@ def get_stock_entry_plan(
     swing_window: int = 2,
     review_bars: int = 60,
 ) -> dict[str, Any]:
-    safe_code = str(code).zfill(6)
+    safe_code = _validate_stock_code(code)
+    adjust = _validate_adjust(adjust)
     database_data = load_daily_prices(adjust, 1, [safe_code], end_date=as_of)
     frame = database_data.get(safe_code)
     if frame is None or frame.empty:

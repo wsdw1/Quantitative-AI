@@ -10,6 +10,7 @@ from tqdm import tqdm
 
 from pipeline.schemas import Candidate
 from pipeline.cancellation import RunCancelledError
+from strategies._utils import apply_cross_section_rank, safe_bool as _safe_bool, safe_float as _safe_float
 from strategies.base import StrategyContext, StrategyMeta
 
 logger = logging.getLogger(__name__)
@@ -24,25 +25,6 @@ DEFAULT_CONFIG = {
     "max_volume_ratio": 0.85,
     "min_score": 0.0,
 }
-
-
-def _safe_float(val, default: float = 0.0) -> float:
-    try:
-        if isinstance(val, pd.Series):
-            val = val.iloc[-1]
-        value = float(val)
-        return default if np.isnan(value) else value
-    except Exception:
-        return default
-
-
-def _safe_bool(val) -> bool:
-    try:
-        if isinstance(val, pd.Series):
-            val = val.iloc[-1]
-        return bool(val) and not (isinstance(val, float) and np.isnan(val))
-    except Exception:
-        return False
 
 
 class VolumeNewHighStrategy:
@@ -120,21 +102,7 @@ class VolumeNewHighStrategy:
         data: Dict[str, pd.DataFrame],
         pick_date: pd.Timestamp,
     ) -> None:
-        rows: list[tuple[str, float]] = []
-        for code, df in data.items():
-            if pick_date not in df.index or "high_stddev" not in df.columns:
-                continue
-            value = df.loc[pick_date, "high_stddev"]
-            if isinstance(value, pd.Series):
-                value = value.iloc[-1]
-            if pd.notna(value):
-                rows.append((code, float(value)))
-        if not rows:
-            return
-        values = pd.Series({code: value for code, value in rows})
-        ranks = values.rank(pct=True)
-        for code, rank_value in ranks.items():
-            data[code].loc[pick_date, "high_stddev_rank"] = float(rank_value)
+        apply_cross_section_rank(data, pick_date, "high_stddev", "high_stddev_rank")
 
     def select(
         self,

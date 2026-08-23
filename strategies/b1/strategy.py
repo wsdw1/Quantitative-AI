@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 from typing import Dict
 
-import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
@@ -17,6 +16,7 @@ from pipeline.selector import (
     compute_weekly_ma,
     compute_zx_ma,
 )
+from strategies._utils import safe_float as _safe_float
 from strategies.base import StrategyContext, StrategyMeta
 
 logger = logging.getLogger(__name__)
@@ -42,25 +42,6 @@ DEFAULT_CONFIG = {
     "volume_ma_window": 20,
     "min_volume_ratio": 1.2,
 }
-
-
-def _safe_float(val, default: float = 0.0) -> float:
-    try:
-        if isinstance(val, pd.Series):
-            val = val.iloc[-1]
-        value = float(val)
-        return default if np.isnan(value) else value
-    except Exception:
-        return default
-
-
-def _safe_bool(val) -> bool:
-    try:
-        if isinstance(val, pd.Series):
-            val = val.iloc[-1]
-        return bool(val) and not (isinstance(val, float) and np.isnan(val))
-    except Exception:
-        return False
 
 
 class B1Strategy:

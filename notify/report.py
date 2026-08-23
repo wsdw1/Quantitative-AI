@@ -62,17 +62,22 @@ def _regime_label(market: dict | None) -> str:
 
 
 def _market_text(market: dict | None) -> list[str]:
-    lines: list[str] = []
     if not market or not market.get("available"):
         return ["指数位置：暂无数据"]
-    for item in market.get("market") or []:
+    lines: list[str] = []
+    items = market.get("market") or []
+    if items:
+        first_date = items[0].get("trade_date")
+        lines.append(f"  数据截至：{first_date or '未标注'}")
+    for item in items:
         code = str(item.get("code", ""))
         name = INDEX_NAMES.get(code, code)
         close = _fmt_close(item.get("close"))
         position = item.get("position")
         reversal = " 反转确认" if item.get("reversal") else ""
-        lines.append(f"  {code} {name}  {close}  {position}分位{reversal}")
-    return lines or ["指数位置：暂无数据"]
+        date = item.get("trade_date") or ""
+        lines.append(f"  {code} {name}  {close}  {position}分位{reversal}  {date}")
+    return lines
 
 
 def _breadth_text(breadth: dict | None) -> list[str]:
@@ -169,12 +174,13 @@ def _market_html(market: dict | None) -> str:
         rows.append(
             "<tr>"
             f"<td>{html.escape(code)}</td><td>{html.escape(name)}</td>"
+            f"<td>{html.escape(str(item.get('trade_date') or '-'))}</td>"
             f"<td>{_fmt_close(item.get('close'))}</td>"
             f"<td>{item.get('position', '-')}</td><td>{reversal}</td>"
             "</tr>"
         )
     return (
-        '<table><tr><th>指数</th><th>名称</th><th>最新点位</th><th>252日位置分位</th><th>反转确认</th></tr>'
+        '<table><tr><th>指数</th><th>名称</th><th>日期</th><th>最新点位</th><th>252日位置分位</th><th>反转确认</th></tr>'
         + "".join(rows)
         + "</table>"
     )
