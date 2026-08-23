@@ -25,15 +25,15 @@ jobs:
   daily:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       # 缓存 SQLite 行情库：首次全量重建，之后每天只增量补新交易日
       - name: Restore quant data cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: data/oversell.db
           key: quant-oversell-db-${{ github.run_id }}
