@@ -44,4 +44,4 @@ jobs:
         run: pip install -r requirements-run.txt
 
       - name: Run daily strategy and send report
-        run: python scripts/daily_report.py
+        run: python scripts/daily_report.py ${{ github.event_name == 'workflow_dispatch' && '--skip-trade-check' || '' }}
