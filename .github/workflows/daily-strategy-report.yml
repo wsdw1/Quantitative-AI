@@ -2,8 +2,8 @@ name: daily-strategy-report
 
 on:
   schedule:
-    # 周一至周五 16:30 北京时间（UTC+8），等当日行情收盘入库后再跑
-    - cron: "30 8 * * 1-5"
+    # 周一至周五 15:30 北京时间（UTC+8），提前触发以缓解 Actions 调度延迟
+    - cron: "30 7 * * 1-5"
   workflow_dispatch: {}
 
 concurrency:
